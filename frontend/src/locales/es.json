@@ -57,6 +57,7 @@
   "metrics.jiraCycleTime": "cycle time jira (med)",
 
   "time.justNow": "hace <1h",
+  "time.minutesAgo": "hace {n}m",
   "time.hoursAgo": "hace {n}h",
   "time.daysAgo": "hace {n}d",
 

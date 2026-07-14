@@ -352,7 +352,10 @@ export function initNotifications() {
   requestPermission();
 }
 
+let refreshGeneration = 0;
+
 export async function refreshAll() {
+  const gen = ++refreshGeneration;
   const cfg = getConfig();
   setStatus(t('status.loading'));
 
@@ -462,6 +465,7 @@ export async function refreshAll() {
 
   await Promise.allSettled([fetchPRs(), fetchMyJira(), fetchWatch()]);
 
+  if (gen !== refreshGeneration) return; // stale, discard
   setStatus(t('status.updated', { time: new Date().toLocaleTimeString() }));
 }
 
@@ -578,14 +582,14 @@ function formatTimeAgo(timestamp) {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return t('time.justNow');
-  if (minutes < 60) return t('time.hoursAgo', { n: minutes });
+  if (minutes < 60) return t('time.minutesAgo', { n: minutes });
   const hours = Math.floor(minutes / 60);
   return t('time.hoursAgo', { n: hours });
 }
 
 export function openAIModal() {
   const cfg = getConfig();
-  if (!cfg.aiApiKey) {
+  if (!(cfg.aiApiKeys?.[cfg.aiProvider] || cfg.aiApiKey)) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -1231,9 +1235,11 @@ export function openSettings(onSave) {
 
   // ---- end AI settings ----
 
+  let pendingRepos = cfg.githubRepos;
+
   overlay.querySelector('#cfg-repo-browser').onclick = () => {
     openRepoBrowser(cfg, (repos) => {
-      setConfig({ ...getConfig(), githubRepos: repos });
+      pendingRepos = repos;
     });
   };
 
@@ -1255,7 +1261,7 @@ export function openSettings(onSave) {
       githubToken: document.getElementById('cfg-gh-token').value.trim(),
       githubEmail: document.getElementById('cfg-gh-email').value.trim(),
       githubUser: document.getElementById('cfg-gh-user').value.trim(),
-      githubRepos: getConfig().githubRepos,
+      githubRepos: pendingRepos,
       jiraDomain: document.getElementById('cfg-jira-domain').value.trim(),
       jiraEmail: document.getElementById('cfg-jira-email').value.trim(),
       jiraToken: document.getElementById('cfg-jira-token').value.trim(),

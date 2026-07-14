@@ -67,10 +67,11 @@ export async function chatCompletion(cfg, { system, user, temperature = 0.3, max
   }
 
   const needsKey = !['custom'].includes(cfg.aiProvider);
-  if (needsKey && !cfg.aiApiKey) throw new Error('Missing API key');
+  const apiKey = cfg.aiApiKeys?.[cfg.aiProvider] || cfg.aiApiKey;
+  if (needsKey && !apiKey) throw new Error('Missing API key');
 
   const headers = { 'Content-Type': 'application/json' };
-  if (cfg.aiApiKey) headers.Authorization = `Bearer ${cfg.aiApiKey}`;
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',

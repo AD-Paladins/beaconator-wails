@@ -238,7 +238,7 @@ Use format: "[ACTION] for [ITEM] — [REASON]"`;
 
 export async function generateInsight(type) {
   const cfg = getConfig();
-  if (!cfg.aiApiKey) throw new Error('no_api_key');
+  if (!(cfg.aiApiKeys?.[cfg.aiProvider] || cfg.aiApiKey)) throw new Error('no_api_key');
 
   const [gh, jira] = await Promise.all([collectGitHubData(cfg), collectJiraData(cfg)]);
 
@@ -263,7 +263,7 @@ export async function generateInsight(type) {
 
 export async function generateAllInsights(onProgress) {
   const cfg = getConfig();
-  if (!cfg.aiApiKey) throw new Error('no_api_key');
+  if (!(cfg.aiApiKeys?.[cfg.aiProvider] || cfg.aiApiKey)) throw new Error('no_api_key');
 
   const [gh, jira] = await Promise.all([collectGitHubData(cfg), collectJiraData(cfg)]);
   const types = ['summary', 'anomalies', 'suggestions'];
@@ -272,14 +272,19 @@ export async function generateAllInsights(onProgress) {
   for (const type of types) {
     if (onProgress) onProgress(type);
     const promptFn = { summary: buildSummaryPrompt, anomalies: buildAnomaliesPrompt, suggestions: buildSuggestionsPrompt }[type];
-    const result = await chatCompletion(cfg, {
-      system: SYSTEM_PROMPT,
-      user: promptFn(gh, jira),
-      temperature: 0.3,
-      maxTokens: 1500,
-    });
-    setCache(type, result);
-    results[type] = result;
+    try {
+      const result = await chatCompletion(cfg, {
+        system: SYSTEM_PROMPT,
+        user: promptFn(gh, jira),
+        temperature: 0.3,
+        maxTokens: 1500,
+      });
+      setCache(type, result);
+      results[type] = result;
+    } catch (e) {
+      console.error(`Failed to generate ${type} insight:`, e);
+      // Continue to next type — partial results are better than nothing
+    }
   }
 
   return results;

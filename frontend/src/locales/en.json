@@ -57,6 +57,7 @@
   "metrics.jiraCycleTime": "jira cycle time (med)",
 
   "time.justNow": "<1h ago",
+  "time.minutesAgo": "{n}m ago",
   "time.hoursAgo": "{n}h ago",
   "time.daysAgo": "{n}d ago",
 
