@@ -12,15 +12,27 @@ import (
 
 // JiraSearch proxies a Jira API search call from the Go backend,
 // avoiding CORS restrictions that apply when fetching from the browser/WebView.
-func (a *App) JiraSearch(domain, jql, email, token string) map[string]any {
+func (a *App) JiraSearch(domain, jql, email, token string, maxResults int, fields string) map[string]any {
 	domain = strings.TrimPrefix(domain, "https://")
 	domain = strings.TrimPrefix(domain, "http://")
 	domain = strings.TrimSuffix(domain, "/")
 
 	auth := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
 
-	url := fmt.Sprintf("https://%s/rest/api/3/search/jql?jql=%s&maxResults=20&fields=summary,status,priority,updated",
-		domain, url.QueryEscape(jql))
+	uf := url.Values{}
+	if maxResults > 0 {
+		uf.Set("maxResults", fmt.Sprintf("%d", maxResults))
+	} else {
+		uf.Set("maxResults", "20")
+	}
+	if fields != "" {
+		uf.Set("fields", fields)
+	} else {
+		uf.Set("fields", "summary,status,priority,updated")
+	}
+	uf.Set("jql", jql)
+
+	url := fmt.Sprintf("https://%s/rest/api/3/search/jql?%s", domain, uf.Encode())
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

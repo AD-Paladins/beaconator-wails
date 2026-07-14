@@ -1,14 +1,16 @@
-export async function fetchJira(cfg, jql) {
+export async function fetchJira(cfg, jql, options = {}) {
   if (!cfg.jiraDomain || !cfg.jiraEmail || !cfg.jiraToken) {
     return { error: 'Configura tu dominio, email y token de Jira en Settings.' };
   }
   const domain = cfg.jiraDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const maxResults = options.maxResults || 20;
+  const fields = options.fields || 'summary,status,priority,updated';
 
   // External CORS proxy — keep using browser fetch (the proxy handles CORS)
   if (cfg.jiraProxyUrl) {
     const proxy = cfg.jiraProxyUrl.replace(/\/$/, '');
     const auth = btoa(`${cfg.jiraEmail}:${cfg.jiraToken}`);
-    const url = `${proxy}/search/jql?jira_domain=${encodeURIComponent(domain)}&jql=${encodeURIComponent(jql)}&maxResults=20&fields=summary,status,priority,updated`;
+    const url = `${proxy}/search/jql?jira_domain=${encodeURIComponent(domain)}&jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fields)}`;
     try {
       const res = await fetch(url, { headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' } });
       if (!res.ok) {
@@ -26,7 +28,7 @@ export async function fetchJira(cfg, jql) {
 
   // Go backend proxy — avoids CORS by routing through the Wails Go runtime
   try {
-    return await window.go.main.App.JiraSearch(domain, jql, cfg.jiraEmail, cfg.jiraToken);
+    return await window.go.main.App.JiraSearch(domain, jql, cfg.jiraEmail, cfg.jiraToken, maxResults, fields);
   } catch (e) {
     return { error: `Error de conexión a Jira: ${e.message}. Verificá tu dominio y conexión a internet.` };
   }
