@@ -2,7 +2,8 @@ const EXPORT_VERSION = 2;
 
 const CATEGORIES = {
   github: { key: 'devdash_config_v1', fields: ['githubToken', 'githubEmail', 'githubUser', 'githubRepos'], label: 'GitHub' },
-  jira: { key: 'devdash_config_v1', fields: ['jiraDomain', 'jiraEmail', 'jiraToken', 'jiraJql', 'jiraProxyUrl'], label: 'Jira' },
+  jira: { key: 'devdash_config_v1', fields: ['jiraDomain', 'jiraEmail', 'jiraToken', 'jiraJql', 'jiraProxyUrl', 'jiraStoryField'], label: 'Jira' },
+  tasks: { key: 'devdash_config_v1', fields: ['taskProvider', 'githubIssuesToken', 'githubIssuesQuery'], label: 'Tasks' },
   ai: { key: 'devdash_config_v1', fields: ['aiProvider', 'aiApiKey', 'aiApiKeys', 'aiModel', 'aiCustomUrl'], label: 'AI' },
   watchlistJira: { key: 'devdash_watchlist_v1', filter: (list) => list.filter((i) => (i.type || 'jira') === 'jira'), label: 'Jira watchlist' },
   watchlistPRs: { key: 'devdash_watchlist_v1', filter: (list) => list.filter((i) => i.type === 'pr'), label: 'PR watchlist' },
@@ -110,6 +111,11 @@ export function exportSelected(categories, password) {
     CATEGORIES.ai.fields.forEach((f) => { ai[f] = cfg[f] || ''; });
     payload._ai = ai;
   }
+  if (categories.tasks) {
+    const tasks = {};
+    CATEGORIES.tasks.fields.forEach((f) => { tasks[f] = cfg[f] || ''; });
+    payload._tasks = tasks;
+  }
   if (categories.watchlistJira) {
     payload._watchlistJira = CATEGORIES.watchlistJira.filter(watchlist);
   }
@@ -187,6 +193,13 @@ export function getImportPreview(payload) {
       }),
     };
   }
+  if (payload._tasks) {
+    const fields = CATEGORIES.tasks.fields;
+    preview.tasks = {
+      label: 'Tasks',
+      items: fields.map((f) => ({ field: f, current: cfg[f] || '', incoming: payload._tasks[f] || '', changed: (cfg[f] || '') !== (payload._tasks[f] || '') })),
+    };
+  }
   if (payload._watchlistJira) {
     const current = watchlist.filter((i) => (i.type || 'jira') === 'jira').map((i) => i.key);
     const incoming = payload._watchlistJira.map((i) => i.key);
@@ -215,6 +228,9 @@ export function applyImport(payload, selected) {
   }
   if (selected.ai && payload._ai) {
     Object.assign(cfg, payload._ai);
+  }
+  if (selected.tasks && payload._tasks) {
+    Object.assign(cfg, payload._tasks);
   }
   localStorage.setItem('devdash_config_v1', JSON.stringify(cfg));
 

@@ -1,5 +1,5 @@
 import { getConfig, setConfig, getWatchlist, setWatchlist } from './config.js';
-import { fetchActivePRs, fetchCheckRuns, fetchPRReviews, searchRepos, fetchSinglePR, fetchRepoPRs } from './github.js';
+import { fetchActivePRs, fetchCheckRuns, fetchPRReviews, searchRepos, fetchSinglePR, fetchRepoPRs, fetchMyPRs, fetchAssignedPRs } from './github.js';
 import { fetchJira } from './jira.js';
 import { computeMetrics } from './metrics.js';
 import { t } from './i18n.js';
@@ -99,6 +99,111 @@ function parseRepoFromPRUrl(url) {
   return m ? { owner: m[1], repo: m[2] } : null;
 }
 
+// ---- PR card creation ----
+
+function createPRCard(pr, prMeta) {
+  const repoName = pr.repository_url.split('/').slice(-2).join('/');
+  const meta = prMeta?.[pr.number] || {};
+  const checks = meta.checks;
+  const mergeState = meta.mergeState;
+  const approvals = meta.approvals;
+  const urlParts = pr.repository_url.split('/');
+  const prOwner = urlParts[urlParts.length - 2];
+  const prRepo = urlParts[urlParts.length - 1];
+  const watched = isPRWatched(prOwner, prRepo, pr.number);
+
+  const badges = [];
+  if (approvals !== undefined) {
+    const cls = approvals >= 2 ? 'badge-ci-success' : approvals >= 1 ? 'badge-ci-pending' : 'badge-ci-failure';
+    const text = approvals >= 2 ? 'approved' : `${approvals} of 2 approvals`;
+    badges.push(`<span class="badge badge-ci ${cls}">${text}</span>`);
+  }
+  if (checks && checks.status !== 'none') {
+    badges.push(`<span class="badge badge-ci badge-ci-${checks.status}">${escapeHtml(ciStatusText(checks))}</span>`);
+  }
+  if (mergeState === 'dirty') {
+    badges.push(`<span class="badge badge-ci badge-ci-failure">has conflicts</span>`);
+  } else if (mergeState === 'clean' && approvals >= 2) {
+    badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
+  }
+
+  const labels = (pr.labels || [])
+    .map((l) => `<span class="pr-label" style="background:#${l.color};color:${isLight(l.color) ? '#1b1c23' : '#fff'}">${escapeHtml(l.name)}</span>`)
+    .join('');
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.innerHTML = `
+    <div class="card-top">
+      <span class="card-id">#${pr.number}</span>
+      <span class="badge badge-repo">${escapeHtml(repoName)}</span>
+      <button class="watch-btn ${watched ? 'watched' : ''}" data-owner="${escapeHtml(prOwner)}" data-repo="${escapeHtml(prRepo)}" data-number="${pr.number}" title="${watched ? t('watchlist.unwatch') : t('watchlist.watch')}">${watched ? '&#9733;' : '&#9734;'}</button>
+    </div>
+    <div class="card-title">${escapeHtml(pr.title)}</div>
+    ${labels ? `<div class="card-labels">${labels}</div>` : ''}
+    ${badges.length ? `<div class="card-badges">${badges.join('')}</div>` : ''}
+    <div class="card-meta">
+      <span>${escapeHtml(pr.user.login)}</span>
+      <span>${timeAgo(pr.updated_at)}</span>
+    </div>
+  `;
+  div.addEventListener('click', (e) => {
+    if (e.target.closest('.watch-btn')) return;
+    window.open(pr.html_url, '_blank');
+  });
+  div.querySelector('.watch-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const newWatched = toggleWatchPR(btn.dataset.owner, btn.dataset.repo, parseInt(btn.dataset.number, 10));
+    btn.classList.toggle('watched', newWatched);
+    btn.innerHTML = newWatched ? '&#9733;' : '&#9734;';
+    btn.title = newWatched ? t('watchlist.unwatch') : t('watchlist.watch');
+  });
+  return div;
+}
+
+// ---- PR meta fetching ----
+
+async function fetchPRMetaBatch(cfg, prs) {
+  const prMeta = {};
+  await Promise.allSettled(
+    (prs || []).map(async (pr) => {
+      try {
+        const prNum = parseInt(pr.pull_request?.html_url?.split('/')?.pop(), 10);
+        if (!prNum) return;
+        const urlParts = pr.repository_url.split('/');
+        const owner = urlParts[urlParts.length - 2];
+        const repo = urlParts[urlParts.length - 1];
+        const prRes = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}`,
+          {
+            headers: {
+              Authorization: `Bearer ${cfg.githubToken}`,
+              Accept: 'application/vnd.github+json',
+            },
+          }
+        );
+        if (!prRes.ok) return;
+        const prData = await prRes.json();
+        const meta = {};
+        if (prData.head?.sha) {
+          const [checks, reviews] = await Promise.all([
+            fetchCheckRuns(cfg, owner, repo, prData.head.sha),
+            fetchPRReviews(cfg, owner, repo, prNum),
+          ]);
+          meta.checks = checks;
+          meta.approvals = reviews.filter((r) => r.state === 'APPROVED').length;
+        }
+        if (prData.mergeable_state) {
+          meta.mergeState = prData.mergeable_state;
+        }
+        prMeta[pr.number] = meta;
+      } catch { /* skip */ }
+    })
+  );
+  return prMeta;
+}
+
 // ---- Rendering ----
 
 export function renderPRs(container, result, onRetry, prMeta) {
@@ -112,65 +217,28 @@ export function renderPRs(container, result, onRetry, prMeta) {
   }
   container.innerHTML = '';
   result.items.forEach((pr) => {
-    const repoName = pr.repository_url.split('/').slice(-2).join('/');
-    const meta = prMeta?.[pr.number] || {};
-    const checks = meta.checks;
-    const mergeState = meta.mergeState;
-    const approvals = meta.approvals;
-    const urlParts = pr.repository_url.split('/');
-    const prOwner = urlParts[urlParts.length - 2];
-    const prRepo = urlParts[urlParts.length - 1];
-    const watched = isPRWatched(prOwner, prRepo, pr.number);
-
-    const badges = [];
-    if (approvals !== undefined) {
-      const cls = approvals >= 2 ? 'badge-ci-success' : approvals >= 1 ? 'badge-ci-pending' : 'badge-ci-failure';
-      const text = approvals >= 2 ? 'approved' : `${approvals} of 2 approvals`;
-      badges.push(`<span class="badge badge-ci ${cls}">${text}</span>`);
-    }
-    if (checks && checks.status !== 'none') {
-      badges.push(`<span class="badge badge-ci badge-ci-${checks.status}">${escapeHtml(ciStatusText(checks))}</span>`);
-    }
-    if (mergeState === 'dirty') {
-      badges.push(`<span class="badge badge-ci badge-ci-failure">has conflicts</span>`);
-    } else if (mergeState === 'clean' && approvals >= 2) {
-      badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
-    }
-
-    const labels = (pr.labels || [])
-      .map((l) => `<span class="pr-label" style="background:#${l.color};color:${isLight(l.color) ? '#1b1c23' : '#fff'}">${escapeHtml(l.name)}</span>`)
-      .join('');
-
-    const div = document.createElement('div');
-    div.className = 'card';
-    div.innerHTML = `
-      <div class="card-top">
-        <span class="card-id">#${pr.number}</span>
-        <span class="badge badge-repo">${escapeHtml(repoName)}</span>
-        <button class="watch-btn ${watched ? 'watched' : ''}" data-owner="${escapeHtml(prOwner)}" data-repo="${escapeHtml(prRepo)}" data-number="${pr.number}" title="${watched ? t('watchlist.unwatch') : t('watchlist.watch')}">${watched ? '&#9733;' : '&#9734;'}</button>
-      </div>
-      <div class="card-title">${escapeHtml(pr.title)}</div>
-      ${labels ? `<div class="card-labels">${labels}</div>` : ''}
-      ${badges.length ? `<div class="card-badges">${badges.join('')}</div>` : ''}
-      <div class="card-meta">
-        <span>${escapeHtml(pr.user.login)}</span>
-        <span>${timeAgo(pr.updated_at)}</span>
-      </div>
-    `;
-    div.addEventListener('click', (e) => {
-      if (e.target.closest('.watch-btn')) return;
-      window.open(pr.html_url, '_blank');
-    });
-    div.querySelector('.watch-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const btn = e.currentTarget;
-      const newWatched = toggleWatchPR(btn.dataset.owner, btn.dataset.repo, parseInt(btn.dataset.number, 10));
-      btn.classList.toggle('watched', newWatched);
-      btn.innerHTML = newWatched ? '&#9733;' : '&#9734;';
-      btn.title = newWatched ? t('watchlist.unwatch') : t('watchlist.watch');
-    });
-    container.appendChild(div);
+    container.appendChild(createPRCard(pr, prMeta));
   });
+}
+
+function renderPRsSections(container, sections, prMeta, onRetry) {
+  container.innerHTML = '';
+  if (!sections?.length) {
+    showEmpty(container, t('pr.empty'));
+    return;
+  }
+  for (const section of sections) {
+    const sectionDiv = document.createElement('div');
+    sectionDiv.className = 'pr-section';
+    const title = document.createElement('div');
+    title.className = 'pr-section-title';
+    title.textContent = `${section.label} (${section.items.length})`;
+    sectionDiv.appendChild(title);
+    section.items.forEach((pr) => {
+      sectionDiv.appendChild(createPRCard(pr, prMeta));
+    });
+    container.appendChild(sectionDiv);
+  }
 }
 
 export function renderJira(container, result, options = {}) {
@@ -368,50 +436,62 @@ export async function refreshAll() {
   showLoading(watchContainer);
 
   const fetchPRs = async () => {
-    const result = await fetchActivePRs(cfg);
-    if (result.error || !result.items?.length) {
-      renderPRs(prContainer, result, fetchPRs);
-      return;
-    }
-    const prMeta = {};
-    await Promise.allSettled(
-      result.items.map(async (pr) => {
-        try {
-          const prNum = parseInt(pr.pull_request.html_url.split('/').pop(), 10);
-          const urlParts = pr.repository_url.split('/');
-          const owner = urlParts[urlParts.length - 2];
-          const repo = urlParts[urlParts.length - 1];
-          const prRes = await fetch(
-            `https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}`,
-            {
-              headers: {
-                Authorization: `Bearer ${cfg.githubToken}`,
-                Accept: 'application/vnd.github+json',
-              },
-            }
-          );
-          if (!prRes.ok) return;
-          const prData = await prRes.json();
-          const meta = {};
-          if (prData.head?.sha) {
-            const [checks, reviews] = await Promise.all([
-              fetchCheckRuns(cfg, owner, repo, prData.head.sha),
-              fetchPRReviews(cfg, owner, repo, prNum),
-            ]);
-            meta.checks = checks;
-            meta.approvals = reviews.filter((r) => r.state === 'APPROVED').length;
-          }
-          if (prData.mergeable_state) {
-            meta.mergeState = prData.mergeable_state;
-          }
-          prMeta[pr.number] = meta;
-        } catch { /* skip */ }
-      })
-    );
-    renderPRs(prContainer, result, fetchPRs, prMeta);
-
     if (cfg.githubUser) {
-      const needReview = result.items.filter((pr) => {
+      // Fetch 3 categories in parallel: my PRs, needs review, assigned
+      const [myRes, reviewRes, assignedRes] = await Promise.allSettled([
+        fetchMyPRs(cfg),
+        fetchActivePRs(cfg),
+        fetchAssignedPRs(cfg),
+      ]);
+
+      // Deduplicate PRs and track sections
+      const allPRs = [];
+      const seen = new Set();
+      const sections = {};
+      const sectionKeys = ['mine', 'review', 'assigned'];
+      const sectionResults = [myRes, reviewRes, assignedRes];
+
+      for (let i = 0; i < sectionKeys.length; i++) {
+        const res = sectionResults[i];
+        const key = sectionKeys[i];
+        const items = res.status === 'fulfilled' ? (res.value?.items || []) : [];
+        sections[key] = [];
+        for (const pr of items) {
+          const id = pr.id || pr.number;
+          if (!seen.has(id)) {
+            seen.add(id);
+            allPRs.push(pr);
+          }
+          sections[key].push(pr);
+        }
+      }
+
+      // Build sections for rendering (non-empty only)
+      const sectionConfig = [
+        ['mine', t('pr.myPRs')],
+        ['review', t('pr.needsReview')],
+        ['assigned', t('pr.assigned')],
+      ];
+      const sectionList = [];
+      for (const [key, label] of sectionConfig) {
+        if (sections[key]?.length) {
+          sectionList.push({ label, items: sections[key] });
+        }
+      }
+
+      if (!sectionList.length) {
+        showEmpty(prContainer, t('pr.empty'));
+        return;
+      }
+
+      // Fetch meta for unique PRs
+      const prMeta = await fetchPRMetaBatch(cfg, allPRs);
+
+      // Render with sections
+      renderPRsSections(prContainer, sectionList, prMeta, fetchPRs);
+
+      // Notifications only for review-requested PRs
+      const needReview = (sections['review'] || []).filter((pr) => {
         if (pr.draft) return false;
         const meta = prMeta[pr.number];
         if (meta?.mergeState === 'clean') return false;
@@ -419,7 +499,16 @@ export async function refreshAll() {
           || pr.requested_teams?.length > 0;
       });
       notifyReviewNeeded(needReview);
-      updateNotifBadge(getPendingCount(result.items.filter((pr) => !pr.draft)));
+      updateNotifBadge(getPendingCount(sections['review'] || []));
+    } else {
+      // No githubUser: keep flat list (needs review across all repos)
+      const result = await fetchActivePRs(cfg);
+      if (result.error || !result.items?.length) {
+        renderPRs(prContainer, result, fetchPRs);
+        return;
+      }
+      const prMeta = await fetchPRMetaBatch(cfg, result.items);
+      renderPRs(prContainer, result, fetchPRs, prMeta);
     }
   };
   const fetchMyJira = () => {

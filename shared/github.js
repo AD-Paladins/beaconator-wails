@@ -49,6 +49,100 @@ export async function fetchActivePRs(cfg) {
   }
 }
 
+export async function fetchMyPRs(cfg) {
+  if (!cfg.githubToken || !cfg.githubRepos || !cfg.githubUser) {
+    return { items: [] };
+  }
+  const repos = cfg.githubRepos.split(',').map((r) => r.trim()).filter(Boolean);
+  const repoQuery = repos.map((r) => `repo:${r}`).join(' ');
+  const q = encodeURIComponent(
+    `is:pr is:open author:${cfg.githubUser} ${repoQuery}`.trim()
+  );
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/search/issues?q=${q}&sort=updated&per_page=20`,
+      {
+        headers: {
+          Authorization: `Bearer ${cfg.githubToken}`,
+          Accept: 'application/vnd.github+json',
+        },
+      }
+    );
+
+    const rateLimit = {
+      remaining: parseInt(res.headers.get('x-ratelimit-remaining') || '-1', 10),
+      reset: parseInt(res.headers.get('x-ratelimit-reset') || '0', 10),
+    };
+
+    if (res.status === 403 && rateLimit.remaining === 0) {
+      const resetDate = new Date(rateLimit.reset * 1000);
+      const minutes = Math.ceil((resetDate - Date.now()) / 60000);
+      return {
+        error: `GitHub rate limit alcanzado. Se resetea en ${minutes} min.`,
+        rateLimited: true,
+        rateLimit,
+      };
+    }
+
+    if (!res.ok) {
+      const body = await res.text();
+      return { error: `GitHub API ${res.status}: ${body.slice(0, 200)}`, rateLimit };
+    }
+    const data = await res.json();
+    return { items: data.items || [], rateLimit };
+  } catch (e) {
+    return { error: `Fallo de red hacia GitHub: ${e.message}` };
+  }
+}
+
+export async function fetchAssignedPRs(cfg) {
+  if (!cfg.githubToken || !cfg.githubRepos || !cfg.githubUser) {
+    return { items: [] };
+  }
+  const repos = cfg.githubRepos.split(',').map((r) => r.trim()).filter(Boolean);
+  const repoQuery = repos.map((r) => `repo:${r}`).join(' ');
+  const q = encodeURIComponent(
+    `is:pr is:open assignee:${cfg.githubUser} ${repoQuery}`.trim()
+  );
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/search/issues?q=${q}&sort=updated&per_page=20`,
+      {
+        headers: {
+          Authorization: `Bearer ${cfg.githubToken}`,
+          Accept: 'application/vnd.github+json',
+        },
+      }
+    );
+
+    const rateLimit = {
+      remaining: parseInt(res.headers.get('x-ratelimit-remaining') || '-1', 10),
+      reset: parseInt(res.headers.get('x-ratelimit-reset') || '0', 10),
+    };
+
+    if (res.status === 403 && rateLimit.remaining === 0) {
+      const resetDate = new Date(rateLimit.reset * 1000);
+      const minutes = Math.ceil((resetDate - Date.now()) / 60000);
+      return {
+        error: `GitHub rate limit alcanzado. Se resetea en ${minutes} min.`,
+        rateLimited: true,
+        rateLimit,
+      };
+    }
+
+    if (!res.ok) {
+      const body = await res.text();
+      return { error: `GitHub API ${res.status}: ${body.slice(0, 200)}`, rateLimit };
+    }
+    const data = await res.json();
+    return { items: data.items || [], rateLimit };
+  } catch (e) {
+    return { error: `Fallo de red hacia GitHub: ${e.message}` };
+  }
+}
+
 export async function fetchCheckRuns(cfg, owner, repo, ref) {
   if (!cfg.githubToken) return null;
   try {

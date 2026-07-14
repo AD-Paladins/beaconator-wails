@@ -1,5 +1,5 @@
 import { getConfig, setConfig, getWatchlist, setWatchlist } from './config.js';
-import { fetchActivePRs, fetchCheckRuns, fetchPRReviews, searchRepos, fetchSinglePR, fetchRepoPRs } from './github.js';
+import { fetchActivePRs, fetchCheckRuns, fetchPRReviews, searchRepos, fetchSinglePR, fetchRepoPRs, fetchMyPRs, fetchAssignedPRs } from './github.js';
 import { fetchJira } from './jira.js';
 import { computeMetrics } from './metrics.js';
 import { t } from './i18n.js';
@@ -9,6 +9,7 @@ import { requestPermission, notifyReviewNeeded, getPendingCount, markAllSeen, ge
 import { THEMES, getTheme, setTheme } from './themes.js';
 import { generateInsight, generateAllInsights, getCached, isCacheValid, renderMarkdown } from './ai.js';
 import { AI_PROVIDERS } from './ai-providers.js';
+import { getTaskProvider } from './task-providers.js';
 
 // ---- Utils ----
 
@@ -99,6 +100,111 @@ function parseRepoFromPRUrl(url) {
   return m ? { owner: m[1], repo: m[2] } : null;
 }
 
+// ---- PR card creation ----
+
+function createPRCard(pr, prMeta) {
+  const repoName = pr.repository_url.split('/').slice(-2).join('/');
+  const meta = prMeta?.[pr.number] || {};
+  const checks = meta.checks;
+  const mergeState = meta.mergeState;
+  const approvals = meta.approvals;
+  const urlParts = pr.repository_url.split('/');
+  const prOwner = urlParts[urlParts.length - 2];
+  const prRepo = urlParts[urlParts.length - 1];
+  const watched = isPRWatched(prOwner, prRepo, pr.number);
+
+  const badges = [];
+  if (approvals !== undefined) {
+    const cls = approvals >= 2 ? 'badge-ci-success' : approvals >= 1 ? 'badge-ci-pending' : 'badge-ci-failure';
+    const text = approvals >= 2 ? 'approved' : `${approvals} of 2 approvals`;
+    badges.push(`<span class="badge badge-ci ${cls}">${text}</span>`);
+  }
+  if (checks && checks.status !== 'none') {
+    badges.push(`<span class="badge badge-ci badge-ci-${checks.status}">${escapeHtml(ciStatusText(checks))}</span>`);
+  }
+  if (mergeState === 'dirty') {
+    badges.push(`<span class="badge badge-ci badge-ci-failure">has conflicts</span>`);
+  } else if (mergeState === 'clean' && approvals >= 2) {
+    badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
+  }
+
+  const labels = (pr.labels || [])
+    .map((l) => `<span class="pr-label" style="background:#${l.color};color:${isLight(l.color) ? '#1b1c23' : '#fff'}">${escapeHtml(l.name)}</span>`)
+    .join('');
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.innerHTML = `
+    <div class="card-top">
+      <span class="card-id">#${pr.number}</span>
+      <span class="badge badge-repo">${escapeHtml(repoName)}</span>
+      <button class="watch-btn ${watched ? 'watched' : ''}" data-owner="${escapeHtml(prOwner)}" data-repo="${escapeHtml(prRepo)}" data-number="${pr.number}" title="${watched ? t('watchlist.unwatch') : t('watchlist.watch')}">${watched ? '&#9733;' : '&#9734;'}</button>
+    </div>
+    <div class="card-title">${escapeHtml(pr.title)}</div>
+    ${labels ? `<div class="card-labels">${labels}</div>` : ''}
+    ${badges.length ? `<div class="card-badges">${badges.join('')}</div>` : ''}
+    <div class="card-meta">
+      <span>${escapeHtml(pr.user.login)}</span>
+      <span>${timeAgo(pr.updated_at)}</span>
+    </div>
+  `;
+  div.addEventListener('click', (e) => {
+    if (e.target.closest('.watch-btn')) return;
+    window.open(pr.html_url, '_blank');
+  });
+  div.querySelector('.watch-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const newWatched = toggleWatchPR(btn.dataset.owner, btn.dataset.repo, parseInt(btn.dataset.number, 10));
+    btn.classList.toggle('watched', newWatched);
+    btn.innerHTML = newWatched ? '&#9733;' : '&#9734;';
+    btn.title = newWatched ? t('watchlist.unwatch') : t('watchlist.watch');
+  });
+  return div;
+}
+
+// ---- PR meta fetching ----
+
+async function fetchPRMetaBatch(cfg, prs) {
+  const prMeta = {};
+  await Promise.allSettled(
+    (prs || []).map(async (pr) => {
+      try {
+        const prNum = parseInt(pr.pull_request?.html_url?.split('/')?.pop(), 10);
+        if (!prNum) return;
+        const urlParts = pr.repository_url.split('/');
+        const owner = urlParts[urlParts.length - 2];
+        const repo = urlParts[urlParts.length - 1];
+        const prRes = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}`,
+          {
+            headers: {
+              Authorization: `Bearer ${cfg.githubToken}`,
+              Accept: 'application/vnd.github+json',
+            },
+          }
+        );
+        if (!prRes.ok) return;
+        const prData = await prRes.json();
+        const meta = {};
+        if (prData.head?.sha) {
+          const [checks, reviews] = await Promise.all([
+            fetchCheckRuns(cfg, owner, repo, prData.head.sha),
+            fetchPRReviews(cfg, owner, repo, prNum),
+          ]);
+          meta.checks = checks;
+          meta.approvals = reviews.filter((r) => r.state === 'APPROVED').length;
+        }
+        if (prData.mergeable_state) {
+          meta.mergeState = prData.mergeable_state;
+        }
+        prMeta[pr.number] = meta;
+      } catch { /* skip */ }
+    })
+  );
+  return prMeta;
+}
+
 // ---- Rendering ----
 
 export function renderPRs(container, result, onRetry, prMeta) {
@@ -112,65 +218,28 @@ export function renderPRs(container, result, onRetry, prMeta) {
   }
   container.innerHTML = '';
   result.items.forEach((pr) => {
-    const repoName = pr.repository_url.split('/').slice(-2).join('/');
-    const meta = prMeta?.[pr.number] || {};
-    const checks = meta.checks;
-    const mergeState = meta.mergeState;
-    const approvals = meta.approvals;
-    const urlParts = pr.repository_url.split('/');
-    const prOwner = urlParts[urlParts.length - 2];
-    const prRepo = urlParts[urlParts.length - 1];
-    const watched = isPRWatched(prOwner, prRepo, pr.number);
-
-    const badges = [];
-    if (approvals !== undefined) {
-      const cls = approvals >= 2 ? 'badge-ci-success' : approvals >= 1 ? 'badge-ci-pending' : 'badge-ci-failure';
-      const text = approvals >= 2 ? 'approved' : `${approvals} of 2 approvals`;
-      badges.push(`<span class="badge badge-ci ${cls}">${text}</span>`);
-    }
-    if (checks && checks.status !== 'none') {
-      badges.push(`<span class="badge badge-ci badge-ci-${checks.status}">${escapeHtml(ciStatusText(checks))}</span>`);
-    }
-    if (mergeState === 'dirty') {
-      badges.push(`<span class="badge badge-ci badge-ci-failure">has conflicts</span>`);
-    } else if (mergeState === 'clean' && approvals >= 2) {
-      badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
-    }
-
-    const labels = (pr.labels || [])
-      .map((l) => `<span class="pr-label" style="background:#${l.color};color:${isLight(l.color) ? '#1b1c23' : '#fff'}">${escapeHtml(l.name)}</span>`)
-      .join('');
-
-    const div = document.createElement('div');
-    div.className = 'card';
-    div.innerHTML = `
-      <div class="card-top">
-        <span class="card-id">#${pr.number}</span>
-        <span class="badge badge-repo">${escapeHtml(repoName)}</span>
-        <button class="watch-btn ${watched ? 'watched' : ''}" data-owner="${escapeHtml(prOwner)}" data-repo="${escapeHtml(prRepo)}" data-number="${pr.number}" title="${watched ? t('watchlist.unwatch') : t('watchlist.watch')}">${watched ? '&#9733;' : '&#9734;'}</button>
-      </div>
-      <div class="card-title">${escapeHtml(pr.title)}</div>
-      ${labels ? `<div class="card-labels">${labels}</div>` : ''}
-      ${badges.length ? `<div class="card-badges">${badges.join('')}</div>` : ''}
-      <div class="card-meta">
-        <span>${escapeHtml(pr.user.login)}</span>
-        <span>${timeAgo(pr.updated_at)}</span>
-      </div>
-    `;
-    div.addEventListener('click', (e) => {
-      if (e.target.closest('.watch-btn')) return;
-      window.open(pr.html_url, '_blank');
-    });
-    div.querySelector('.watch-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const btn = e.currentTarget;
-      const newWatched = toggleWatchPR(btn.dataset.owner, btn.dataset.repo, parseInt(btn.dataset.number, 10));
-      btn.classList.toggle('watched', newWatched);
-      btn.innerHTML = newWatched ? '&#9733;' : '&#9734;';
-      btn.title = newWatched ? t('watchlist.unwatch') : t('watchlist.watch');
-    });
-    container.appendChild(div);
+    container.appendChild(createPRCard(pr, prMeta));
   });
+}
+
+function renderPRsSections(container, sections, prMeta, onRetry) {
+  container.innerHTML = '';
+  if (!sections?.length) {
+    showEmpty(container, t('pr.empty'));
+    return;
+  }
+  for (const section of sections) {
+    const sectionDiv = document.createElement('div');
+    sectionDiv.className = 'pr-section';
+    const title = document.createElement('div');
+    title.className = 'pr-section-title';
+    title.textContent = `${section.label} (${section.items.length})`;
+    sectionDiv.appendChild(title);
+    section.items.forEach((pr) => {
+      sectionDiv.appendChild(createPRCard(pr, prMeta));
+    });
+    container.appendChild(sectionDiv);
+  }
 }
 
 export function renderJira(container, result, options = {}) {
@@ -255,6 +324,79 @@ export function renderJira(container, result, options = {}) {
       });
     });
   }
+}
+
+export function renderTasks(container, result, options = {}) {
+  if (result.error) {
+    showError(container, result.error, options.onRetry || null);
+    return;
+  }
+  if (!result.items.length) {
+    showEmpty(container, t('jira.empty'));
+    return;
+  }
+  container.innerHTML = '';
+  const cfg = getConfig();
+  const providerId = options.providerId || cfg.taskProvider || 'jira';
+  const showWatch = options.showWatchBtn !== false && providerId === 'jira';
+
+  result.items.forEach((item) => {
+    const created = item.createdAt || null;
+    const updated = item.updatedAt || null;
+    const storyPoints = item.extra?.storyPoints ?? null;
+
+    const metaParts = [];
+    if (item.priority) {
+      metaParts.push(`<span class="badge badge-priority badge-priority-${item.priority.toLowerCase()}">${escapeHtml(item.priority)}</span>`);
+    }
+    if (created) {
+      const daysActive = Math.floor((Date.now() - new Date(created).getTime()) / 86400000);
+      metaParts.push(`<span>${t('jira.daysActive', { n: daysActive })}</span>`);
+    }
+    if (storyPoints !== null && storyPoints !== undefined) {
+      metaParts.push(`<span>${t('jira.storyPoints', { n: storyPoints })}</span>`);
+    }
+
+    let metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join(' · ')}</div>` : '';
+
+    let footerHtml = '';
+    if (updated) {
+      footerHtml = `<div class="card-footer"><span>${t('jira.updated', { ago: timeAgo(updated) })}</span></div>`;
+    }
+
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <div class="card-top">
+        <span class="card-id">${escapeHtml(item.id)}</span>
+        <span class="badge badge-status-${item.statusColor}">${escapeHtml(item.status)}</span>
+        ${showWatch ? `<button class="watch-btn" data-key="${escapeHtml(item.id)}" title="${t('watchlist.watch')}">&#9734;</button>` : ''}
+      </div>
+      <div class="card-title">${escapeHtml(item.title)}</div>
+      ${metaHtml}
+      ${footerHtml}
+    `;
+    div.addEventListener('click', (e) => {
+      if (e.target.closest('.watch-btn')) return;
+      if (item.url) window.open(item.url, '_blank');
+    });
+    const watchBtn = div.querySelector('.watch-btn');
+    if (watchBtn) {
+      const isWatched = isJiraWatched(item.id);
+      watchBtn.classList.toggle('watched', isWatched);
+      watchBtn.innerHTML = isWatched ? '&#9733;' : '&#9734;';
+      watchBtn.title = isWatched ? t('watchlist.unwatch') : t('watchlist.watch');
+      watchBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const btn = e.currentTarget;
+        const newWatched = toggleWatchJira(btn.dataset.key);
+        btn.classList.toggle('watched', newWatched);
+        btn.innerHTML = newWatched ? '&#9733;' : '&#9734;';
+        btn.title = newWatched ? t('watchlist.unwatch') : t('watchlist.watch');
+      });
+    }
+    container.appendChild(div);
+  });
 }
 
 function renderWatchlistUnified(container, jiraResult, prItems, options = {}) {
@@ -405,50 +547,62 @@ export async function refreshAll() {
   showLoading(watchContainer);
 
   const fetchPRs = async () => {
-    const result = await fetchActivePRs(cfg);
-    if (result.error || !result.items?.length) {
-      renderPRs(prContainer, result, fetchPRs);
-      return;
-    }
-    const prMeta = {};
-    await Promise.allSettled(
-      result.items.map(async (pr) => {
-        try {
-          const prNum = parseInt(pr.pull_request.html_url.split('/').pop(), 10);
-          const urlParts = pr.repository_url.split('/');
-          const owner = urlParts[urlParts.length - 2];
-          const repo = urlParts[urlParts.length - 1];
-          const prRes = await fetch(
-            `https://api.github.com/repos/${owner}/${repo}/pulls/${prNum}`,
-            {
-              headers: {
-                Authorization: `Bearer ${cfg.githubToken}`,
-                Accept: 'application/vnd.github+json',
-              },
-            }
-          );
-          if (!prRes.ok) return;
-          const prData = await prRes.json();
-          const meta = {};
-          if (prData.head?.sha) {
-            const [checks, reviews] = await Promise.all([
-              fetchCheckRuns(cfg, owner, repo, prData.head.sha),
-              fetchPRReviews(cfg, owner, repo, prNum),
-            ]);
-            meta.checks = checks;
-            meta.approvals = reviews.filter((r) => r.state === 'APPROVED').length;
-          }
-          if (prData.mergeable_state) {
-            meta.mergeState = prData.mergeable_state;
-          }
-          prMeta[pr.number] = meta;
-        } catch { /* skip */ }
-      })
-    );
-    renderPRs(prContainer, result, fetchPRs, prMeta);
-
     if (cfg.githubUser) {
-      const needReview = result.items.filter((pr) => {
+      // Fetch 3 categories in parallel: my PRs, needs review, assigned
+      const [myRes, reviewRes, assignedRes] = await Promise.allSettled([
+        fetchMyPRs(cfg),
+        fetchActivePRs(cfg),
+        fetchAssignedPRs(cfg),
+      ]);
+
+      // Deduplicate PRs and track sections
+      const allPRs = [];
+      const seen = new Set();
+      const sections = {};
+      const sectionKeys = ['mine', 'review', 'assigned'];
+      const sectionResults = [myRes, reviewRes, assignedRes];
+
+      for (let i = 0; i < sectionKeys.length; i++) {
+        const res = sectionResults[i];
+        const key = sectionKeys[i];
+        const items = res.status === 'fulfilled' ? (res.value?.items || []) : [];
+        sections[key] = [];
+        for (const pr of items) {
+          const id = pr.id || pr.number;
+          if (!seen.has(id)) {
+            seen.add(id);
+            allPRs.push(pr);
+          }
+          sections[key].push(pr);
+        }
+      }
+
+      // Build sections for rendering (non-empty only)
+      const sectionConfig = [
+        ['mine', t('pr.myPRs')],
+        ['review', t('pr.needsReview')],
+        ['assigned', t('pr.assigned')],
+      ];
+      const sectionList = [];
+      for (const [key, label] of sectionConfig) {
+        if (sections[key]?.length) {
+          sectionList.push({ label, items: sections[key] });
+        }
+      }
+
+      if (!sectionList.length) {
+        showEmpty(prContainer, t('pr.empty'));
+        return;
+      }
+
+      // Fetch meta for unique PRs
+      const prMeta = await fetchPRMetaBatch(cfg, allPRs);
+
+      // Render with sections
+      renderPRsSections(prContainer, sectionList, prMeta, fetchPRs);
+
+      // Notifications only for review-requested PRs
+      const needReview = (sections['review'] || []).filter((pr) => {
         if (pr.draft) return false;
         const meta = prMeta[pr.number];
         if (meta?.mergeState === 'clean') return false;
@@ -456,14 +610,21 @@ export async function refreshAll() {
           || pr.requested_teams?.length > 0;
       });
       notifyReviewNeeded(needReview);
-      updateNotifBadge(getPendingCount(result.items.filter((pr) => !pr.draft)));
+      updateNotifBadge(getPendingCount(sections['review'] || []));
+    } else {
+      // No githubUser: keep flat list (needs review across all repos)
+      const result = await fetchActivePRs(cfg);
+      if (result.error || !result.items?.length) {
+        renderPRs(prContainer, result, fetchPRs);
+        return;
+      }
+      const prMeta = await fetchPRMetaBatch(cfg, result.items);
+      renderPRs(prContainer, result, fetchPRs, prMeta);
     }
   };
-  const fetchMyJira = () => {
-    const myJql = cfg.jiraJql || 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
-    const fields = ['summary', 'status', 'priority', 'updated', 'created'];
-    if (cfg.jiraStoryField) fields.push(cfg.jiraStoryField);
-    return fetchJira(cfg, myJql, { maxResults: 50, fields: fields.join(',') }).then((r) => renderJira(jiraContainer, r, { onRetry: fetchMyJira }));
+  const fetchMyTasks = () => {
+    const provider = getTaskProvider(cfg.taskProvider || 'jira');
+    return provider.fetchTasks(cfg).then((r) => renderTasks(jiraContainer, r, { onRetry: fetchMyTasks, providerId: provider.id }));
   };
   const fetchWatch = () => {
     const watchlist = getWatchlist().map(normalizeWatchItem);
@@ -504,7 +665,7 @@ export async function refreshAll() {
     });
   };
 
-  await Promise.allSettled([fetchPRs(), fetchMyJira(), fetchWatch()]);
+  await Promise.allSettled([fetchPRs(), fetchMyTasks(), fetchWatch()]);
 
   if (gen !== refreshGeneration) return; // stale, discard
   setStatus(t('status.updated', { time: new Date().toLocaleTimeString() }));
@@ -596,6 +757,12 @@ function openHelp() {
           <p>${t('help.jira.credentials')}</p>
           <p>${t('help.jira.jql')}</p>
           <p>${t('help.jira.noProxy')}</p>
+        </div>
+        <div class="help-section">
+          <h3>${t('help.tasks.title')}</h3>
+          <p>${t('help.tasks.provider')}</p>
+          <p>${t('help.tasks.jira')}</p>
+          <p>${t('help.tasks.github')}</p>
         </div>
         <div class="help-section">
           <h3>${t('help.watchlist.title')}</h3>
@@ -1094,6 +1261,7 @@ export function openSettings(onSave) {
       <h2>${t('settings.title')}</h2>
       <div class="settings-tabs">
         <button class="settings-tab active" data-tab="general">${t('settings.tabGeneral')}</button>
+        <button class="settings-tab" data-tab="tasks">${t('settings.tabTasks')}</button>
         <button class="settings-tab" data-tab="ai">${t('settings.tabAI')}</button>
         <button class="settings-tab" data-tab="watchlist">${t('settings.tabWatchlist')}</button>
         <button class="settings-tab" data-tab="io">${t('settings.tabIO')}</button>
@@ -1123,28 +1291,55 @@ export function openSettings(onSave) {
           <input type="text" id="cfg-gh-user" value="${escapeHtml(cfg.githubUser || '')}" placeholder="${t('settings.ghUser.placeholder')}" />
           <div class="field-hint">${t('settings.ghUser.hint')}</div>
         </div>
+      </div>
 
-        <div class="section-divider">${t('settings.jira')}</div>
+      <div class="settings-tab-panel" data-panel="tasks">
+        <div class="section-divider">${t('settings.tasks')}</div>
         <div class="field">
-          <label>${t('settings.jiraDomain')}</label>
-          <input type="text" id="cfg-jira-domain" value="${escapeHtml(cfg.jiraDomain)}" placeholder="yourcompany.atlassian.net" />
+          <label>${t('settings.taskProvider')}</label>
+          <select id="cfg-task-provider" class="cfg-select">
+            <option value="jira"${cfg.taskProvider === 'jira' || !cfg.taskProvider ? ' selected' : ''}>Jira</option>
+            <option value="github"${cfg.taskProvider === 'github' ? ' selected' : ''}>GitHub Issues</option>
+          </select>
         </div>
-        <div class="field">
-          <label>${t('settings.jiraEmail')}</label>
-          <input type="text" id="cfg-jira-email" value="${escapeHtml(cfg.jiraEmail)}" placeholder="you@email.com" />
+
+        <div id="cfg-jira-fields">
+          <div class="section-divider">${t('settings.jira')}</div>
+          <div class="field">
+            <label>${t('settings.jiraDomain')}</label>
+            <input type="text" id="cfg-jira-domain" value="${escapeHtml(cfg.jiraDomain)}" placeholder="yourcompany.atlassian.net" />
+          </div>
+          <div class="field">
+            <label>${t('settings.jiraEmail')}</label>
+            <input type="text" id="cfg-jira-email" value="${escapeHtml(cfg.jiraEmail)}" placeholder="you@email.com" />
+          </div>
+          <div class="field">
+            <label>${t('settings.jiraToken')}</label>
+            <input type="password" id="cfg-jira-token" value="${escapeHtml(cfg.jiraToken)}" placeholder="token" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>${t('settings.jiraJql')}</label>
+            <textarea id="cfg-jira-jql" placeholder="assignee = currentUser() AND resolution = Unresolved">${escapeHtml(cfg.jiraJql)}</textarea>
+          </div>
+          <div class="field">
+            <label>${t('settings.jiraStoryField')}</label>
+            <input type="text" id="cfg-jira-story-field" value="${escapeHtml(cfg.jiraStoryField || 'customfield_10016')}" placeholder="customfield_10016" />
+            <div class="field-hint">${t('settings.jiraStoryField.hint')}</div>
+          </div>
         </div>
-        <div class="field">
-          <label>${t('settings.jiraToken')}</label>
-          <input type="password" id="cfg-jira-token" value="${escapeHtml(cfg.jiraToken)}" placeholder="token" autocomplete="off" />
-        </div>
-        <div class="field">
-          <label>${t('settings.jiraJql')}</label>
-          <textarea id="cfg-jira-jql" placeholder="assignee = currentUser() AND resolution = Unresolved">${escapeHtml(cfg.jiraJql)}</textarea>
-        </div>
-        <div class="field">
-          <label>${t('settings.jiraStoryField')}</label>
-          <input type="text" id="cfg-jira-story-field" value="${escapeHtml(cfg.jiraStoryField || 'customfield_10016')}" placeholder="customfield_10016" />
-          <div class="field-hint">${t('settings.jiraStoryField.hint')}</div>
+
+        <div id="cfg-github-fields" style="display:none">
+          <div class="section-divider">${t('settings.githubIssues')}</div>
+          <div class="field">
+            <label>${t('settings.githubIssuesToken')}</label>
+            <input type="password" id="cfg-github-issues-token" value="${escapeHtml(cfg.githubIssuesToken || cfg.githubToken || '')}" placeholder="ghp_..." autocomplete="off" />
+            <div class="field-hint">${t('settings.githubIssuesToken.hint')}</div>
+          </div>
+          <div class="field">
+            <label>${t('settings.githubIssuesQuery')}</label>
+            <input type="text" id="cfg-github-issues-query" value="${escapeHtml(cfg.githubIssuesQuery || '')}" placeholder="is:issue is:open sort:updated-desc" />
+            <div class="field-hint">${t('settings.githubIssuesQuery.hint')}</div>
+          </div>
         </div>
       </div>
 
@@ -1280,7 +1475,22 @@ export function openSettings(onSave) {
   aiProviderSelect.addEventListener('change', updateAIFields);
   updateAIFields();
 
-  // ---- end AI settings ----
+  // ---- Task provider toggle ----
+
+  const taskProviderSelect = overlay.querySelector('#cfg-task-provider');
+  const jiraFieldsWrapper = overlay.querySelector('#cfg-jira-fields');
+  const githubFieldsWrapper = overlay.querySelector('#cfg-github-fields');
+
+  function updateTaskProviderFields() {
+    const provider = taskProviderSelect.value;
+    jiraFieldsWrapper.style.display = provider === 'jira' ? '' : 'none';
+    githubFieldsWrapper.style.display = provider === 'github' ? '' : 'none';
+  }
+
+  taskProviderSelect.addEventListener('change', updateTaskProviderFields);
+  updateTaskProviderFields();
+
+  // ---- end Task provider toggle ----
 
   let pendingRepos = cfg.githubRepos;
 
@@ -1315,6 +1525,9 @@ export function openSettings(onSave) {
       jiraJql: document.getElementById('cfg-jira-jql').value.trim(),
       jiraStoryField: document.getElementById('cfg-jira-story-field').value.trim() || 'customfield_10016',
       jiraProxyUrl: '',
+      taskProvider: document.getElementById('cfg-task-provider').value,
+      githubIssuesToken: document.getElementById('cfg-github-issues-token')?.value.trim() || '',
+      githubIssuesQuery: document.getElementById('cfg-github-issues-query')?.value.trim() || '',
       aiProvider: document.getElementById('cfg-ai-provider').value,
       aiApiKey: document.getElementById('cfg-ai-key').value.trim(),
       aiApiKeys: { ...aiApiKeys, [document.getElementById('cfg-ai-provider').value]: document.getElementById('cfg-ai-key').value.trim() },

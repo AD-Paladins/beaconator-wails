@@ -694,6 +694,20 @@ main {
   margin-bottom: 6px;
 }
 
+/* PR sections */
+.pr-section {
+  margin-bottom: 12px;
+}
+.pr-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+
 /* Export/Import checklist */
 .export-checklist, .import-preview {
   max-height: 300px;

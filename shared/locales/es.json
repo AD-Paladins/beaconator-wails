@@ -10,6 +10,9 @@
   "panel.metrics": "metrics",
 
   "pr.empty": "Sin PRs activos.",
+  "pr.myPRs": "Mis PRs",
+  "pr.needsReview": "Necesitan mi review",
+  "pr.assigned": "Asignados a mí",
   "jira.empty": "Nada por aquí.",
   "watchlist.empty": "Agregá tickets o PRs a tu watchlist.",
   "watchlist.remove": "quitar",
