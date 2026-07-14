@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "beaconator-desktop",
+  "outputfilename": "Beaconator",
+  "wailsjsdir": "./frontend/src",
+  "author": {
+    "name": "Andres D. Paladines",
+    "email": "andrespaladines@hotmail.com"
+  }
+}

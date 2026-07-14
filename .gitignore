@@ -1,0 +1,105 @@
+# Wails bin directory
+build/bin
+# Wails Windows NSIS support files
+build/windows/installer/wails_tools.nsh
+build/windows/installer/tmp/
+
+# IDEs
+.idea
+.vscode
+
+# The black hole that is...
+node_modules
+
+# --------------------------------------------------
+# Go
+# --------------------------------------------------
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace
+go.work.sum
+
+# --------------------------------------------------
+# Wails
+# --------------------------------------------------
+build/bin/
+build/dist/
+build/*.syso
+
+# Wails generated files
+wailsjs/
+
+# --------------------------------------------------
+# Frontend (Node)
+# --------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+dist/
+.vite/
+.cache/
+
+# --------------------------------------------------
+# Environment
+# --------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --------------------------------------------------
+# IDE
+# --------------------------------------------------
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# JetBrains
+.idea/
+
+# Fleet
+.fleet/
+
+# --------------------------------------------------
+# macOS
+# --------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# --------------------------------------------------
+# Logs
+# --------------------------------------------------
+*.log
+
+# --------------------------------------------------
+# Temporary
+# --------------------------------------------------
+tmp/
+temp/
+
+# --------------------------------------------------
+# Test artifacts
+# --------------------------------------------------
+coverage/
+*.coverprofile
+
+.atl/.skill-registry.cache.json
