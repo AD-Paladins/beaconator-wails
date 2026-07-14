@@ -4,7 +4,7 @@ export async function fetchJira(cfg, jql, options = {}) {
   }
   const domain = cfg.jiraDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
   const maxResults = options.maxResults || 20;
-  const fields = options.fields || 'summary,status,priority,updated';
+  const fields = options.fields || 'summary,status,priority,updated,created';
 
   // External CORS proxy — keep using browser fetch (the proxy handles CORS)
   if (cfg.jiraProxyUrl) {

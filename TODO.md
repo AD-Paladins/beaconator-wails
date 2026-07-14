@@ -1,9 +1,13 @@
 ## Pendientes
 
-### ✅ Set up shared/ architecture en beaconator-web
+### 🟢 shared/ architecture — CERRADO
 
-- [x] Crear `shared/` en beaconator-web con los mismos archivos que acá
-- [x] Actualizar `jira.js` del web para aceptar tercer parámetro `options` (`maxResults`, `fields`)
-- [x] Reemplazar `metrics.js` del web por la versión de `shared/` (usa `fetchJira()` en vez de `fetch()` directo)
-- [x] Integrar `sync.sh` (copiar `sync-web.sh` → web y renombrar)
-- [x] Verificar que los query params adicionales (`maxResults`, `fields`) no rompan el Cloudflare Worker CORS proxy
+El proyecto **beaconator-web** fue [archivado] — ya no se mantiene. El shared/ architecture quedó implementado en ambos repos como paso intermedio, pero **beaconator-wails es ahora el proyecto único**.
+
+- `shared/` → la source of truth definitiva (acá en wails)
+- `sync.sh` + `sync-web.sh` → ya no se usan (no hay cross-repo que syncronizar)
+- Todo el código útil ya está acá ✅
+
+### 🔵 Evaluación: Wails vs Nativa
+
+Pendiente de definir si seguimos invirtiendo en Wails o migramos a app nativa.

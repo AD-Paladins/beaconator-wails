@@ -11,6 +11,9 @@
 
   "pr.empty": "Sin PRs activos.",
   "jira.empty": "Nada por aquí.",
+  "jira.daysActive": "{n}d activo",
+  "jira.storyPoints": "SP: {n}",
+  "jira.updated": "actualizado {ago}",
   "watchlist.empty": "Agregá tickets o PRs a tu watchlist.",
   "watchlist.remove": "quitar",
   "watchlist.watch": "agregar a watchlist",
@@ -53,6 +56,7 @@
   "metrics.reviewRounds": "rondas de review (med)",
   "metrics.waitingSecond": "esperando 2do approval",
   "metrics.mergeRate": "merge rate",
+  "metrics.stalePRs": "PRs estancados (sin actividad)",
   "metrics.jiraThroughput": "jira throughput",
   "metrics.jiraCycleTime": "cycle time jira (med)",
 
@@ -86,6 +90,8 @@
   "settings.jiraEmail": "Email de Jira",
   "settings.jiraToken": "API token de Jira",
   "settings.jiraJql": "JQL personalizado para \"My Jira\" (opcional)",
+  "settings.jiraStoryField": "ID del campo personalizado de story points",
+  "settings.jiraStoryField.hint": "Dejá customfield_10016 si no estás seguro. Preguntá a tu admin de Jira cuál es el campo correcto.",
 
 
   "settings.watchlistKeys": "Tickets de Jira (keys separados por coma)",

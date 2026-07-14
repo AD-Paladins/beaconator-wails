@@ -190,6 +190,30 @@ export function renderJira(container, result, options = {}) {
     const cfg = getConfig();
     const domain = cfg.jiraDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
     const watched = isJiraWatched(issue.key);
+
+    const priority = issue.fields?.priority?.name || null;
+    const priorityIcon = issue.fields?.priority?.iconUrl || null;
+    const created = issue.fields?.created || null;
+    const updated = issue.fields?.updated || null;
+    const storyPoints = cfg.jiraStoryField ? issue.fields?.[cfg.jiraStoryField] : null;
+
+    const metaParts = [];
+    if (priority) metaParts.push(`<span class="badge badge-priority badge-priority-${priority.toLowerCase()}">${priorityIcon ? `<img src="${escapeHtml(priorityIcon)}" class="priority-icon" />` : ''}${escapeHtml(priority)}</span>`);
+    if (created) {
+      const daysActive = Math.floor((Date.now() - new Date(created).getTime()) / 86400000);
+      metaParts.push(`<span>${t('jira.daysActive', { n: daysActive })}</span>`);
+    }
+    if (storyPoints !== null && storyPoints !== undefined) {
+      metaParts.push(`<span>${t('jira.storyPoints', { n: storyPoints })}</span>`);
+    }
+
+    let metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join(' · ')}</div>` : '';
+
+    let footerHtml = '';
+    if (updated) {
+      footerHtml = `<div class="card-footer"><span>${t('jira.updated', { ago: timeAgo(updated) })}</span></div>`;
+    }
+
     div.innerHTML = `
       <div class="card-top">
         <span class="card-id">${escapeHtml(issue.key)}</span>
@@ -197,6 +221,8 @@ export function renderJira(container, result, options = {}) {
         ${options.showWatchBtn !== false ? `<button class="watch-btn ${watched ? 'watched' : ''}" data-key="${escapeHtml(issue.key)}" title="${watched ? t('watchlist.unwatch') : t('watchlist.watch')}">${watched ? '&#9733;' : '&#9734;'}</button>` : ''}
       </div>
       <div class="card-title">${escapeHtml(issue.fields?.summary || '')}</div>
+      ${metaHtml}
+      ${footerHtml}
       ${options.watchable ? `<div class="card-meta"><span class="watch-remove" data-key="${escapeHtml(issue.key)}">${t('watchlist.remove')}</span></div>` : ''}
     `;
     div.addEventListener('click', (e) => {
@@ -243,6 +269,16 @@ function renderWatchlistUnified(container, jiraResult, prItems, options = {}) {
       const status = issue.fields?.status?.name || 'unknown';
       const cfg = getConfig();
       const domain = cfg.jiraDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const storyPoints = cfg.jiraStoryField ? issue.fields?.[cfg.jiraStoryField] : null;
+      const created = issue.fields?.created || null;
+      const metaParts = [];
+      if (created) {
+        const daysActive = Math.floor((Date.now() - new Date(created).getTime()) / 86400000);
+        metaParts.push(t('jira.daysActive', { n: daysActive }));
+      }
+      if (storyPoints !== null && storyPoints !== undefined) {
+        metaParts.push(t('jira.storyPoints', { n: storyPoints }));
+      }
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `
@@ -252,6 +288,7 @@ function renderWatchlistUnified(container, jiraResult, prItems, options = {}) {
           <button class="watch-remove" data-type="jira" data-key="${escapeHtml(issue.key)}" title="${t('watchlist.remove')}">&times;</button>
         </div>
         <div class="card-title">${escapeHtml(issue.fields?.summary || '')}</div>
+        ${metaParts.length ? `<div class="card-meta">${metaParts.join(' · ')}</div>` : ''}
       `;
       card.addEventListener('click', (e) => {
         if (e.target.closest('.watch-remove')) return;
@@ -424,7 +461,9 @@ export async function refreshAll() {
   };
   const fetchMyJira = () => {
     const myJql = cfg.jiraJql || 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
-    return fetchJira(cfg, myJql).then((r) => renderJira(jiraContainer, r, { onRetry: fetchMyJira }));
+    const fields = ['summary', 'status', 'priority', 'updated', 'created'];
+    if (cfg.jiraStoryField) fields.push(cfg.jiraStoryField);
+    return fetchJira(cfg, myJql, { maxResults: 50, fields: fields.join(',') }).then((r) => renderJira(jiraContainer, r, { onRetry: fetchMyJira }));
   };
   const fetchWatch = () => {
     const watchlist = getWatchlist().map(normalizeWatchItem);
@@ -435,8 +474,10 @@ export async function refreshAll() {
     const jiraKeys = watchlist.filter((i) => i.type === 'jira').map((i) => i.key);
     const prItems = watchlist.filter((i) => i.type === 'pr');
 
+    const jiraFields = ['summary', 'status', 'priority', 'updated', 'created'];
+    if (cfg.jiraStoryField) jiraFields.push(cfg.jiraStoryField);
     const jiraPromise = jiraKeys.length
-      ? fetchJira(cfg, `key in (${jiraKeys.join(',')})`).then((r) => ({ jira: r }))
+      ? fetchJira(cfg, `key in (${jiraKeys.join(',')})`, { fields: jiraFields.join(',') }).then((r) => ({ jira: r }))
       : Promise.resolve({ jira: { items: [] } });
 
     const prPromises = prItems.map(async (item) => {
@@ -505,6 +546,7 @@ function renderMetrics(container, data, onRetry) {
     ${metricCard(t('metrics.reviewRounds'), gh.reviewRounds !== null && gh.reviewRounds !== undefined ? gh.reviewRounds.toFixed(1) : null)}
     ${metricCard(t('metrics.waitingSecond'), gh.waitingForSecond !== null && gh.waitingForSecond !== undefined ? gh.waitingForSecond : null)}
     ${metricCard(t('metrics.mergeRate'), gh.mergeRate !== null && gh.mergeRate !== undefined ? `${gh.mergeRate}%` : null)}
+    ${metricCard(t('metrics.stalePRs'), gh.staleCount !== null && gh.staleCount !== undefined ? gh.staleCount : null)}
     <div class="metrics-section">Jira</div>
     ${metricCard(t('metrics.jiraThroughput'), jira.throughput !== null && jira.throughput !== undefined ? `${jira.throughput}` : null)}
     ${metricCard(t('metrics.jiraCycleTime'), formatHours(jira.cycleTime))}
@@ -1099,6 +1141,11 @@ export function openSettings(onSave) {
           <label>${t('settings.jiraJql')}</label>
           <textarea id="cfg-jira-jql" placeholder="assignee = currentUser() AND resolution = Unresolved">${escapeHtml(cfg.jiraJql)}</textarea>
         </div>
+        <div class="field">
+          <label>${t('settings.jiraStoryField')}</label>
+          <input type="text" id="cfg-jira-story-field" value="${escapeHtml(cfg.jiraStoryField || 'customfield_10016')}" placeholder="customfield_10016" />
+          <div class="field-hint">${t('settings.jiraStoryField.hint')}</div>
+        </div>
       </div>
 
       <div class="settings-tab-panel" data-panel="ai">
@@ -1266,6 +1313,7 @@ export function openSettings(onSave) {
       jiraEmail: document.getElementById('cfg-jira-email').value.trim(),
       jiraToken: document.getElementById('cfg-jira-token').value.trim(),
       jiraJql: document.getElementById('cfg-jira-jql').value.trim(),
+      jiraStoryField: document.getElementById('cfg-jira-story-field').value.trim() || 'customfield_10016',
       jiraProxyUrl: '',
       aiProvider: document.getElementById('cfg-ai-provider').value,
       aiApiKey: document.getElementById('cfg-ai-key').value.trim(),

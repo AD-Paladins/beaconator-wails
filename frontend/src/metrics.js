@@ -153,6 +153,8 @@ async function computeGitHubMetrics(cfg, periodDays) {
     return { rateLimited: true, minutes: openPRs.minutes };
   }
 
+  const staleThreshold = daysAgo(periodDays);
+  let staleCount = 0;
   for (const pr of (openPRs || [])) {
     const urlParts = pr.repository_url.split('/');
     const owner = urlParts[urlParts.length - 2];
@@ -160,6 +162,7 @@ async function computeGitHubMetrics(cfg, periodDays) {
     const reviews = await fetchPRReviews(cfg, owner, repo, pr.number);
     const approvals = reviews.filter((r) => r.state === 'APPROVED');
     if (approvals.length === 1) waitingForSecond++;
+    if (pr.updated_at && pr.updated_at.split('T')[0] < staleThreshold) staleCount++;
   }
 
   return {
@@ -169,6 +172,7 @@ async function computeGitHubMetrics(cfg, periodDays) {
     waitingForSecond,
     mergeRate,
     mergeTimes: median(mergeTimes),
+    staleCount,
   };
 }
 

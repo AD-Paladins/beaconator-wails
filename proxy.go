@@ -28,7 +28,7 @@ func (a *App) JiraSearch(domain, jql, email, token string, maxResults int, field
 	if fields != "" {
 		uf.Set("fields", fields)
 	} else {
-		uf.Set("fields", "summary,status,priority,updated")
+		uf.Set("fields", "summary,status,priority,updated,created")
 	}
 	uf.Set("jql", jql)
 
