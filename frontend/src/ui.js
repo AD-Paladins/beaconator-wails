@@ -19,7 +19,7 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
-function timeAgo(dateStr) {
+export function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const hours = Math.floor(diff / 3600000);
   if (hours < 1) return t('time.justNow');
@@ -51,7 +51,7 @@ function isLight(hex) {
 
 // ---- Watchlist helpers ----
 
-function normalizeWatchItem(item) {
+export function normalizeWatchItem(item) {
   if (typeof item === 'string') return { type: 'jira', key: item };
   return item;
 }

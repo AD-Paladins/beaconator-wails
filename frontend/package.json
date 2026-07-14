@@ -1,0 +1,17 @@
+{
+  "name": "beaconator-desktop-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "security:go": "govulncheck ./... && gosec ./...",
+    "security:js": "npm audit",
+    "security:all": "npm run security:go && npm run security:js"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.0",
+    "jsdom": "^26.0.0"
+  }
+}
