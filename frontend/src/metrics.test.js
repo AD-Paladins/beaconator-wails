@@ -161,27 +161,36 @@ describe('computeMetrics', () => {
   })
 
   it('calculates stale PRs correctly', async () => {
-    // One PR updated 33 days ago → stale for 30-day window
-    // One PR updated 2 days ago → not stale
-    mockSequential([
-      // 1. merged PRs (empty)
-      { json: { items: [] }},
-      // 2. closed PRs (empty)
-      { json: { items: [] }},
-      // 3. open PRs (2 items — one stale, one fresh)
-      { json: { items: [
-        openPR(1, { updatedAt: '2026-06-11T10:00:00Z' }), // 33 days ago → stale
-        openPR(2, { updatedAt: '2026-07-12T10:00:00Z' }), // 2 days ago → fresh
-      ]}},
-      // 4. reviews for open PR#1
-      { json: [] },
-      // 5. reviews for open PR#2
-      { json: [] },
-    ])
+    // staleCount is computed relative to the real system clock (daysAgo() uses `new Date()`),
+    // so the "today" this test's fixture dates are relative to must be pinned, or it breaks
+    // once enough real time passes.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-14T12:00:00Z'))
+    try {
+      // One PR updated 33 days ago → stale for 30-day window
+      // One PR updated 2 days ago → not stale
+      mockSequential([
+        // 1. merged PRs (empty)
+        { json: { items: [] }},
+        // 2. closed PRs (empty)
+        { json: { items: [] }},
+        // 3. open PRs (2 items — one stale, one fresh)
+        { json: { items: [
+          openPR(1, { updatedAt: '2026-06-11T10:00:00Z' }), // 33 days ago → stale
+          openPR(2, { updatedAt: '2026-07-12T10:00:00Z' }), // 2 days ago → fresh
+        ]}},
+        // 4. reviews for open PR#1
+        { json: [] },
+        // 5. reviews for open PR#2
+        { json: [] },
+      ])
 
-    const result = await computeMetrics(30)
+      const result = await computeMetrics(30)
 
-    expect(result.github.staleCount).toBe(1)
+      expect(result.github.staleCount).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('handles PRs with no reviews', async () => {

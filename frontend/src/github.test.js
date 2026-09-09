@@ -184,7 +184,7 @@ describe('fetchActivePRs', () => {
     vi.restoreAllMocks()
   })
 
-  it('constructs correct API call with token, repos, email, and user', async () => {
+  it('prefers review-requested over author-email when both are set (they cannot both match the same PR)', async () => {
     const fetchMock = mockFetch({ items: [] })
     const cfg = {
       githubToken: 'test-token',
@@ -198,10 +198,24 @@ describe('fetchActivePRs', () => {
     const url = fetchMock.mock.calls[0][0]
     expect(url).toContain('https://api.github.com/search/issues')
     expect(url).toContain(encodeURIComponent('repo:owner/repo'))
-    expect(url).toContain(encodeURIComponent('author-email:user@test.com'))
     expect(url).toContain(encodeURIComponent('review-requested:testuser'))
+    expect(url).not.toContain(encodeURIComponent('author-email:user@test.com'))
     expect(url).toContain('sort=updated')
     expect(url).toContain('per_page=20')
+  })
+
+  it('falls back to author-email when no githubUser is set', async () => {
+    const fetchMock = mockFetch({ items: [] })
+    const cfg = {
+      githubToken: 'test-token',
+      githubRepos: 'owner/repo',
+      githubEmail: 'user@test.com',
+    }
+
+    await fetchActivePRs(cfg)
+
+    const url = fetchMock.mock.calls[0][0]
+    expect(url).toContain(encodeURIComponent('author-email:user@test.com'))
   })
 
   it('returns error when no token is set', async () => {
