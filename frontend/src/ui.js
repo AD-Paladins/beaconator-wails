@@ -1351,6 +1351,7 @@ export function openSettings(onSave) {
           <div class="field">
             <label>${t('settings.jiraToken')}</label>
             <input type="password" id="cfg-jira-token" value="${escapeHtml(cfg.jiraToken)}" placeholder="token" autocomplete="off" />
+            <div class="field-hint">${t('settings.jiraToken.hint')}</div>
           </div>
           <div class="field">
             <label>${t('settings.jiraJql')}</label>

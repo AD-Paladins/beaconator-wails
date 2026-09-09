@@ -90,6 +90,7 @@
   "settings.jiraDomain": "Domain (e.g. yourcompany.atlassian.net)",
   "settings.jiraEmail": "Jira email",
   "settings.jiraToken": "Jira API token",
+  "settings.jiraToken.hint": "Generate one at <a href=\"https://id.atlassian.com/tokens\" target=\"_blank\" rel=\"noopener\">id.atlassian.com > Manage API tokens</a> to generate a token.",
   "settings.jiraJql": "Custom JQL for \"My Jira\" (optional)",
 
 
