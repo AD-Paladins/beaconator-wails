@@ -15,6 +15,7 @@
   "pr.assigned": "Asignados a mí",
   "jira.empty": "Nada por aquí.",
   "jira.daysActive": "{n}d activo",
+  "pr.daysOpen": "{n}d abierto",
   "jira.storyPoints": "SP: {n}",
   "jira.updated": "actualizado {ago}",
   "watchlist.empty": "Agregá tickets o PRs a tu watchlist.",
@@ -79,7 +80,8 @@
   "settings.jira": "Jira",
   "settings.watchlist": "Watchlist",
 
-  "settings.ghToken": "Personal access token (scope: repo)",
+  "settings.ghToken": "PAT clásico",
+  "settings.ghToken.hint": "Generalo en <a href=\"https://github.com/settings/tokens\" target=\"_blank\" rel=\"noopener\">github.com/settings/tokens</a> → Generate new token (classic) → marcá el scope <code>repo</code>.",
   "settings.ghEmail": "Email de GitHub",
   "settings.ghEmail.hint": "Se usa para filtrar PRs a los tuyos. Es el email de tus commits.",
   "settings.ghUser": "Usuario de GitHub (opcional)",

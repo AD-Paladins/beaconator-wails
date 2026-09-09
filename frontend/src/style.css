@@ -319,6 +319,8 @@ main {
 .badge-ci-success { background: rgba(74,222,128,0.15); color: var(--accent-jira); }
 .badge-ci-failure { background: rgba(226,84,74,0.15); color: var(--danger); }
 .badge-ci-pending { background: rgba(240,168,58,0.15); color: var(--accent-watch); }
+.badge-age-warning { background: rgba(240,168,58,0.15); color: var(--accent-watch); }
+.badge-age-alert { background: rgba(226,84,74,0.15); color: var(--danger); }
 .badge-status-done { background: rgba(74,222,128,0.15); color: var(--accent-jira); }
 .badge-status-progress { background: rgba(240,168,58,0.15); color: var(--accent-watch); }
 .badge-status-todo { background: rgba(139,141,154,0.15); color: var(--text-dim); }
@@ -674,6 +676,15 @@ main {
   white-space: nowrap;
   max-width: 260px;
 }
+.watched-prs-remove {
+  cursor: pointer;
+  color: var(--danger);
+  text-decoration: underline;
+  margin-left: auto;
+}
+.watched-prs-remove:hover {
+  opacity: 0.75;
+}
 .repo-selected {
   font-size: 11px;
   color: var(--text-dim);
@@ -707,6 +718,32 @@ main {
   border-bottom: 1px solid var(--border);
   margin-bottom: 6px;
 }
+
+/* PR repo groups (collapsible) */
+.pr-repo-group {
+  margin-bottom: 8px;
+}
+.pr-repo-header {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 4px 0;
+  user-select: none;
+}
+.pr-repo-header::-webkit-details-marker { display: none; }
+.pr-repo-header::before {
+  content: '\25b8';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s;
+}
+.pr-repo-group[open] > .pr-repo-header::before {
+  transform: rotate(90deg);
+}
+.pr-repo-header:hover { color: var(--text); }
 
 /* Export/Import checklist */
 .export-checklist, .import-preview {

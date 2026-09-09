@@ -14,6 +14,7 @@
   "pr.needsReview": "Necesitan mi review",
   "pr.assigned": "Asignados a mí",
   "jira.empty": "Nada por aquí.",
+  "pr.daysOpen": "{n}d abierto",
   "watchlist.empty": "Agregá tickets o PRs a tu watchlist.",
   "watchlist.remove": "quitar",
   "watchlist.watch": "agregar a watchlist",
@@ -74,7 +75,8 @@
   "settings.jira": "Jira",
   "settings.watchlist": "Watchlist",
 
-  "settings.ghToken": "Personal access token (scope: repo)",
+  "settings.ghToken": "PAT clásico",
+  "settings.ghToken.hint": "Generalo en <a href=\"https://github.com/settings/tokens\" target=\"_blank\" rel=\"noopener\">github.com/settings/tokens</a> → Generate new token (classic) → marcá el scope <code>repo</code>.",
   "settings.ghEmail": "Email de GitHub",
   "settings.ghEmail.hint": "Se usa para filtrar PRs a los tuyos. Es el email de tus commits.",
   "settings.ghUser": "Usuario de GitHub (opcional)",

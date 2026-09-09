@@ -127,6 +127,12 @@ function createPRCard(pr, prMeta) {
   } else if (mergeState === 'clean' && approvals >= 2) {
     badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
   }
+  const daysOpen = Math.floor((Date.now() - new Date(pr.created_at).getTime()) / 86400000);
+  if (daysOpen >= 5) {
+    badges.push(`<span class="badge badge-age-alert">${t('pr.daysOpen', { n: daysOpen })}</span>`);
+  } else if (daysOpen >= 2) {
+    badges.push(`<span class="badge badge-age-warning">${t('pr.daysOpen', { n: daysOpen })}</span>`);
+  }
 
   const labels = (pr.labels || [])
     .map((l) => `<span class="pr-label" style="background:#${l.color};color:${isLight(l.color) ? '#1b1c23' : '#fff'}">${escapeHtml(l.name)}</span>`)
@@ -145,7 +151,7 @@ function createPRCard(pr, prMeta) {
     ${badges.length ? `<div class="card-badges">${badges.join('')}</div>` : ''}
     <div class="card-meta">
       <span>${escapeHtml(pr.user.login)}</span>
-      <span>${timeAgo(pr.updated_at)}</span>
+      <span>${t('jira.updated', { ago: timeAgo(pr.updated_at) })}</span>
     </div>
   `;
   div.addEventListener('click', (e) => {
@@ -161,6 +167,35 @@ function createPRCard(pr, prMeta) {
     btn.title = newWatched ? t('watchlist.unwatch') : t('watchlist.watch');
   });
   return div;
+}
+
+// ---- PR grouping ----
+
+function groupPRsByRepo(prs) {
+  const groups = new Map();
+  for (const pr of prs) {
+    const repoName = pr.repository_url.split('/').slice(-2).join('/');
+    if (!groups.has(repoName)) groups.set(repoName, []);
+    groups.get(repoName).push(pr);
+  }
+  return [...groups.keys()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((repoName) => ({
+      repoName,
+      items: groups.get(repoName).sort((a, b) => a.number - b.number),
+    }));
+}
+
+function createRepoGroup(repoName, items, prMeta) {
+  const details = document.createElement('details');
+  details.className = 'pr-repo-group';
+  details.open = true;
+  const summary = document.createElement('summary');
+  summary.className = 'pr-repo-header';
+  summary.textContent = `${repoName} (${items.length})`;
+  details.appendChild(summary);
+  items.forEach((pr) => details.appendChild(createPRCard(pr, prMeta)));
+  return details;
 }
 
 // ---- PR meta fetching ----
@@ -217,9 +252,9 @@ export function renderPRs(container, result, onRetry, prMeta) {
     return;
   }
   container.innerHTML = '';
-  result.items.forEach((pr) => {
-    container.appendChild(createPRCard(pr, prMeta));
-  });
+  for (const group of groupPRsByRepo(result.items)) {
+    container.appendChild(createRepoGroup(group.repoName, group.items, prMeta));
+  }
 }
 
 function renderPRsSections(container, sections, prMeta, onRetry) {
@@ -235,9 +270,9 @@ function renderPRsSections(container, sections, prMeta, onRetry) {
     title.className = 'pr-section-title';
     title.textContent = `${section.label} (${section.items.length})`;
     sectionDiv.appendChild(title);
-    section.items.forEach((pr) => {
-      sectionDiv.appendChild(createPRCard(pr, prMeta));
-    });
+    for (const group of groupPRsByRepo(section.items)) {
+      sectionDiv.appendChild(createRepoGroup(group.repoName, group.items, prMeta));
+    }
     container.appendChild(sectionDiv);
   }
 }
@@ -447,7 +482,8 @@ function renderWatchlistUnified(container, jiraResult, prItems, options = {}) {
     section.className = 'watch-section';
     section.innerHTML = `<div class="watch-section-title">${t('watchlist.prSection')}</div>`;
     prItems.forEach(({ pr, meta }) => {
-      const repoName = pr.repository_url.split('/').slice(-2).join('/');
+      // fetchSinglePR returns the direct Pulls API shape, which has base.repo, not repository_url (search-only field)
+      const repoName = pr.base?.repo?.full_name || '';
       const checks = meta?.checks;
       const mergeState = meta?.mergeState;
       const approvals = meta?.approvals;
@@ -465,9 +501,7 @@ function renderWatchlistUnified(container, jiraResult, prItems, options = {}) {
       } else if (mergeState === 'clean' && approvals >= 2) {
         badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
       }
-      const urlParts = pr.repository_url.split('/');
-      const prOwner = urlParts[urlParts.length - 2];
-      const prRepo = urlParts[urlParts.length - 1];
+      const [prOwner, prRepo] = repoName.split('/');
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `
@@ -1273,6 +1307,7 @@ export function openSettings(onSave) {
         <div class="field">
           <label>${t('settings.ghToken')}</label>
           <input type="password" id="cfg-gh-token" value="${escapeHtml(cfg.githubToken)}" placeholder="ghp_..." autocomplete="off" />
+          <div class="field-hint">${t('settings.ghToken.hint')}</div>
         </div>
         <div class="field">
           <label>${t('settings.ghRepos')}</label>

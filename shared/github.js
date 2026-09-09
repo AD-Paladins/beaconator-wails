@@ -4,12 +4,13 @@ export async function fetchActivePRs(cfg) {
   }
   const repos = cfg.githubRepos.split(',').map((r) => r.trim()).filter(Boolean);
   const repoQuery = repos.map((r) => `repo:${r}`).join(' ');
-  const emailClause = cfg.githubEmail ? `author-email:${cfg.githubEmail}` : '';
+  // author-email is only a fallback for when there's no githubUser to build review-requested from —
+  // ANDing both would require a PR to be self-authored AND self-review-requested, which never matches.
   const userClause = cfg.githubUser
     ? `review-requested:${cfg.githubUser}`
-    : '';
+    : (cfg.githubEmail ? `author-email:${cfg.githubEmail}` : '');
   const q = encodeURIComponent(
-    `is:pr is:open ${repoQuery} ${emailClause} ${userClause}`.trim()
+    `is:pr is:open ${repoQuery} ${userClause}`.trim()
   );
 
   try {
