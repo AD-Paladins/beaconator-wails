@@ -13,6 +13,7 @@
   "pr.myPRs": "Mis PRs",
   "pr.needsReview": "Necesitan mi review",
   "pr.assigned": "Asignados a mí",
+  "pr.hideApproved": "Ocultar aprobados",
   "jira.empty": "Nada por aquí.",
   "jira.daysActive": "{n}d activo",
   "pr.daysOpen": "{n}d abierto",

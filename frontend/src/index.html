@@ -36,7 +36,13 @@
 
   <main>
     <section class="panel">
-      <p class="panel-title"><span class="dot dot-pr"></span><span data-i18n="panel.prs">active prs</span></p>
+      <div class="panel-header">
+        <p class="panel-title"><span class="dot dot-pr"></span><span data-i18n="panel.prs">active prs</span></p>
+        <label class="pr-filter-toggle">
+          <input type="checkbox" id="pr-hide-approved" />
+          <span data-i18n="pr.hideApproved">Hide approved</span>
+        </label>
+      </div>
       <div id="pr-list"></div>
     </section>
 

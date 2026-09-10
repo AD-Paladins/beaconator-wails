@@ -1,4 +1,4 @@
-import { refreshAll, openSettings, refreshMetrics, setupPeriodButtons, initNotifications, openAIModal } from './ui.js';
+import { refreshAll, openSettings, refreshMetrics, setupPeriodButtons, setupPRFilter, initNotifications, openAIModal } from './ui.js';
 import { t, setLanguage, getLanguage, getAvailableLanguages, updateDOM } from './i18n.js';
 import { THEMES, getTheme, setTheme } from './themes.js';
 
@@ -123,6 +123,7 @@ updateDOM();
 setupLangSelector();
 setupThemeSelector();
 setupPeriodButtons();
+setupPRFilter();
 initNotifications();
 refreshAll();
 refreshMetrics();

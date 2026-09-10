@@ -205,6 +205,34 @@ export async function fetchPRReviews(cfg, owner, repo, prNumber) {
   }
 }
 
+// Review thread resolution ('unresolved conversations') has no REST equivalent — only GraphQL exposes it.
+export async function fetchUnresolvedThreadCount(cfg, owner, repo, prNumber) {
+  if (!cfg.githubToken) return 0;
+  const query = `query($owner:String!,$repo:String!,$number:Int!){
+    repository(owner:$owner,name:$repo){
+      pullRequest(number:$number){
+        reviewThreads(first:100){ nodes{ isResolved } }
+      }
+    }
+  }`;
+  try {
+    const res = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.githubToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, variables: { owner, repo, number: prNumber } }),
+    });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    const nodes = data?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
+    return nodes.filter((n) => !n.isResolved).length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function searchRepos(cfg, query) {
   if (!cfg.githubToken || !query) return [];
   try {

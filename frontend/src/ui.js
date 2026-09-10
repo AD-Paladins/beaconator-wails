@@ -1,5 +1,5 @@
 import { getConfig, setConfig, getWatchlist, setWatchlist } from './config.js';
-import { fetchActivePRs, fetchCheckRuns, fetchPRReviews, searchRepos, fetchSinglePR, fetchRepoPRs, fetchMyPRs, fetchAssignedPRs } from './github.js';
+import { fetchActivePRs, fetchCheckRuns, fetchPRReviews, fetchUnresolvedThreadCount, searchRepos, fetchSinglePR, fetchRepoPRs, fetchMyPRs, fetchAssignedPRs } from './github.js';
 import { fetchJira } from './jira.js';
 import { computeMetrics } from './metrics.js';
 import { t } from './i18n.js';
@@ -10,6 +10,7 @@ import { THEMES, getTheme, setTheme } from './themes.js';
 import { generateInsight, generateAllInsights, getCached, isCacheValid, renderMarkdown } from './ai.js';
 import { AI_PROVIDERS } from './ai-providers.js';
 import { getTaskProvider } from './task-providers.js';
+import { countApprovals, getPRReadiness, PR_READY_REQUIRED_APPROVALS } from './pr-rules.js';
 
 // ---- Utils ----
 
@@ -106,25 +107,30 @@ function createPRCard(pr, prMeta) {
   const repoName = pr.repository_url.split('/').slice(-2).join('/');
   const meta = prMeta?.[pr.number] || {};
   const checks = meta.checks;
-  const mergeState = meta.mergeState;
   const approvals = meta.approvals;
+  const readiness = meta.readiness;
   const urlParts = pr.repository_url.split('/');
   const prOwner = urlParts[urlParts.length - 2];
   const prRepo = urlParts[urlParts.length - 1];
   const watched = isPRWatched(prOwner, prRepo, pr.number);
 
   const badges = [];
-  if (approvals !== undefined) {
-    const cls = approvals >= 2 ? 'badge-ci-success' : approvals >= 1 ? 'badge-ci-pending' : 'badge-ci-failure';
-    const text = approvals >= 2 ? 'approved' : `${approvals} of 2 approvals`;
+  if (readiness === 'changes_requested') {
+    badges.push(`<span class="badge badge-ci badge-ci-failure">changes requested</span>`);
+  } else if (readiness === 'unresolved_comments') {
+    const n = meta.unresolvedThreads;
+    badges.push(`<span class="badge badge-ci badge-ci-pending">${n} unresolved comment${n === 1 ? '' : 's'}</span>`);
+  } else if (approvals !== undefined) {
+    const cls = approvals >= PR_READY_REQUIRED_APPROVALS ? 'badge-ci-success' : approvals >= 1 ? 'badge-ci-pending' : 'badge-ci-failure';
+    const text = approvals >= PR_READY_REQUIRED_APPROVALS ? 'approved' : `${approvals} of ${PR_READY_REQUIRED_APPROVALS} approvals`;
     badges.push(`<span class="badge badge-ci ${cls}">${text}</span>`);
   }
   if (checks && checks.status !== 'none') {
     badges.push(`<span class="badge badge-ci badge-ci-${checks.status}">${escapeHtml(ciStatusText(checks))}</span>`);
   }
-  if (mergeState === 'dirty') {
+  if (readiness === 'conflicts') {
     badges.push(`<span class="badge badge-ci badge-ci-failure">has conflicts</span>`);
-  } else if (mergeState === 'clean' && approvals >= 2) {
+  } else if (readiness === 'ready') {
     badges.push(`<span class="badge badge-ci badge-ci-success">ready to merge</span>`);
   }
   const daysOpen = Math.floor((Date.now() - new Date(pr.created_at).getTime()) / 86400000);
@@ -139,7 +145,9 @@ function createPRCard(pr, prMeta) {
     .join('');
 
   const div = document.createElement('div');
-  div.className = 'card';
+  div.className = readiness === 'ready' ? 'card card-pr-approved'
+    : readiness === 'changes_requested' ? 'card card-pr-blocked'
+    : 'card';
   div.innerHTML = `
     <div class="card-top">
       <span class="card-id">#${pr.number}</span>
@@ -228,7 +236,13 @@ async function fetchPRMetaBatch(cfg, prs) {
             fetchPRReviews(cfg, owner, repo, prNum),
           ]);
           meta.checks = checks;
-          meta.approvals = reviews.filter((r) => r.state === 'APPROVED').length;
+          meta.approvals = countApprovals(reviews);
+          // Only worth the extra GraphQL round trip once a PR would otherwise look "ready"
+          const unresolvedThreads = meta.approvals >= PR_READY_REQUIRED_APPROVALS
+            ? await fetchUnresolvedThreadCount(cfg, owner, repo, prNum)
+            : 0;
+          meta.unresolvedThreads = unresolvedThreads;
+          meta.readiness = getPRReadiness({ reviews, unresolvedThreads, mergeState: prData.mergeable_state });
         }
         if (prData.mergeable_state) {
           meta.mergeState = prData.mergeable_state;
@@ -566,6 +580,40 @@ export function initNotifications() {
 }
 
 let refreshGeneration = 0;
+let hideApprovedPRs = false;
+let lastPRData = null; // { mode: 'sections', sectionList, prMeta } | { mode: 'flat', result, prMeta }
+
+function prIsReady(pr, prMeta) {
+  return prMeta?.[pr.number]?.readiness === 'ready';
+}
+
+function renderPRList(container, onRetry) {
+  if (!lastPRData) return;
+  const { prMeta } = lastPRData;
+  if (lastPRData.mode === 'sections') {
+    const sectionList = hideApprovedPRs
+      ? lastPRData.sectionList
+          .map((s) => ({ label: s.label, items: s.items.filter((pr) => !prIsReady(pr, prMeta)) }))
+          .filter((s) => s.items.length)
+      : lastPRData.sectionList;
+    renderPRsSections(container, sectionList, prMeta, onRetry);
+  } else {
+    const result = hideApprovedPRs
+      ? { ...lastPRData.result, items: lastPRData.result.items.filter((pr) => !prIsReady(pr, prMeta)) }
+      : lastPRData.result;
+    renderPRs(container, result, onRetry, prMeta);
+  }
+}
+
+export function setupPRFilter() {
+  const checkbox = document.getElementById('pr-hide-approved');
+  if (!checkbox) return;
+  checkbox.checked = hideApprovedPRs;
+  checkbox.addEventListener('change', () => {
+    hideApprovedPRs = checkbox.checked;
+    renderPRList(document.getElementById('pr-list'), () => refreshAll());
+  });
+}
 
 export async function refreshAll() {
   const gen = ++refreshGeneration;
@@ -633,7 +681,8 @@ export async function refreshAll() {
       const prMeta = await fetchPRMetaBatch(cfg, allPRs);
 
       // Render with sections
-      renderPRsSections(prContainer, sectionList, prMeta, fetchPRs);
+      lastPRData = { mode: 'sections', sectionList, prMeta };
+      renderPRList(prContainer, fetchPRs);
 
       // Notifications only for review-requested PRs
       const needReview = (sections['review'] || []).filter((pr) => {
@@ -649,11 +698,13 @@ export async function refreshAll() {
       // No githubUser: keep flat list (needs review across all repos)
       const result = await fetchActivePRs(cfg);
       if (result.error || !result.items?.length) {
+        lastPRData = null;
         renderPRs(prContainer, result, fetchPRs);
         return;
       }
       const prMeta = await fetchPRMetaBatch(cfg, result.items);
-      renderPRs(prContainer, result, fetchPRs, prMeta);
+      lastPRData = { mode: 'flat', result, prMeta };
+      renderPRList(prContainer, fetchPRs);
     }
   };
   const fetchMyTasks = () => {

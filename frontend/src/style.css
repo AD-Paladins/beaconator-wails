@@ -246,6 +246,14 @@ main {
   transition: border-color 0.15s;
 }
 .card:hover { border-color: var(--text-dim); }
+.card-pr-approved {
+  border-left: 3px solid var(--accent-jira);
+  background: rgba(74,222,128,0.06);
+}
+.card-pr-blocked {
+  border-left: 3px solid var(--danger);
+  background: rgba(226,84,74,0.06);
+}
 
 .card-top {
   display: flex;
@@ -493,6 +501,18 @@ main {
   border-color: var(--accent-metrics);
   color: #0d0e11;
 }
+
+.pr-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.pr-filter-toggle:hover { color: var(--text); }
+.pr-filter-toggle input { cursor: pointer; }
 
 .metrics-grid {
   display: grid;

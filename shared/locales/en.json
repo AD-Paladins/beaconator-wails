@@ -13,6 +13,7 @@
   "pr.myPRs": "My PRs",
   "pr.needsReview": "Needs my review",
   "pr.assigned": "Assigned to me",
+  "pr.hideApproved": "Hide approved",
   "jira.empty": "Nothing here.",
   "pr.daysOpen": "{n}d open",
   "watchlist.empty": "Add tickets or PRs to your watchlist.",

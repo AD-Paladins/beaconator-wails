@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mockFetch, mockFetchError } from './vitest.setup.js'
-import { searchIssues, getIssue, fetchActivePRs } from './github.js'
+import { searchIssues, getIssue, fetchActivePRs, fetchUnresolvedThreadCount } from './github.js'
 
 describe('searchIssues', () => {
   beforeEach(() => {
@@ -264,5 +264,56 @@ describe('fetchActivePRs', () => {
 
     const opts = fetchMock.mock.calls[0][1]
     expect(opts.headers.Authorization).toBe('Bearer ghp_secret')
+  })
+})
+
+describe('fetchUnresolvedThreadCount', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('returns 0 when no token is set', async () => {
+    const result = await fetchUnresolvedThreadCount({ githubToken: '' }, 'owner', 'repo', 1)
+    expect(result).toBe(0)
+  })
+
+  it('posts a GraphQL query to api.github.com/graphql', async () => {
+    const fetchMock = mockFetch({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } })
+    const cfg = { githubToken: 'test-token' }
+
+    await fetchUnresolvedThreadCount(cfg, 'owner', 'repo', 42)
+
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.github.com/graphql')
+    expect(opts.method).toBe('POST')
+    expect(opts.headers.Authorization).toBe('Bearer test-token')
+    const body = JSON.parse(opts.body)
+    expect(body.variables).toEqual({ owner: 'owner', repo: 'repo', number: 42 })
+  })
+
+  it('counts only unresolved threads', async () => {
+    mockFetch({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: { nodes: [{ isResolved: false }, { isResolved: true }, { isResolved: false }] },
+          },
+        },
+      },
+    })
+    const result = await fetchUnresolvedThreadCount({ githubToken: 'test-token' }, 'owner', 'repo', 1)
+    expect(result).toBe(2)
+  })
+
+  it('returns 0 on network error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
+    const result = await fetchUnresolvedThreadCount({ githubToken: 'test-token' }, 'owner', 'repo', 1)
+    expect(result).toBe(0)
+  })
+
+  it('returns 0 on non-ok response', async () => {
+    mockFetchError(500)
+    const result = await fetchUnresolvedThreadCount({ githubToken: 'test-token' }, 'owner', 'repo', 1)
+    expect(result).toBe(0)
   })
 })
