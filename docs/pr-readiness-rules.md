@@ -14,7 +14,9 @@ to document.
 
 ```mermaid
 flowchart TD
-    A[PR] --> B{Latest review per user:<br/>any CHANGES_REQUESTED?}
+    A[PR] --> Z{pr.draft == true?}
+    Z -- yes --> R0["draft<br/>(neutral badge, never 'ready' regardless of approvals)"]
+    Z -- no --> B{Latest review per user:<br/>any CHANGES_REQUESTED?}
     B -- yes --> R1["changes_requested<br/>(red highlight, blocks everything else)"]
     B -- no --> C{mergeable_state == dirty?}
     C -- yes --> R2["conflicts<br/>(red 'has conflicts' badge)"]
@@ -29,8 +31,11 @@ flowchart TD
 
 ## Why this exists
 
-Two real cases exposed why a bare `approvals >= 2` check is wrong:
+Three real cases exposed why a bare `approvals >= 2` check is wrong:
 
+- A **draft PR** is never mergeable on GitHub regardless of review state — it must be marked
+  "Ready for review" first. This is checked before anything else so a draft with 2 approvals
+  (e.g. approved pre-emptively) never shows as `ready`.
 - A PR with 2 approvals can still have an outstanding **CHANGES_REQUESTED** review from a third
   reviewer — GitHub doesn't clear that until the same reviewer re-reviews. Counting only the
   *latest* review per user (not just "any review ever") is required to detect this correctly, and
@@ -44,6 +49,7 @@ Two real cases exposed why a bare `approvals >= 2` check is wrong:
 
 | State | Badge | Card highlight | Hidden by "Hide approved" filter |
 |---|---|---|---|
+| `draft` | "draft" (neutral gray) | none | no |
 | `changes_requested` | "changes requested" (red) | red left border | no |
 | `conflicts` | "has conflicts" (red) | none | no |
 | `unresolved_comments` | "N unresolved comments" (amber) | none | no |

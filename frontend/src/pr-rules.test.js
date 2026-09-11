@@ -107,6 +107,14 @@ describe('getPRReadiness', () => {
     expect(getPRReadiness({ reviews, mergeState: 'dirty' })).toBe('conflicts')
   })
 
+  it('flags draft even with 2 approvals and no other blockers', () => {
+    const reviews = [
+      review('alice', 'APPROVED', '2026-07-01T10:00:00Z'),
+      review('bob', 'APPROVED', '2026-07-01T10:00:00Z'),
+    ]
+    expect(getPRReadiness({ reviews, draft: true })).toBe('draft')
+  })
+
   it('is partially_approved with only one approval', () => {
     const reviews = [review('alice', 'APPROVED', '2026-07-01T10:00:00Z')]
     expect(getPRReadiness({ reviews })).toBe('partially_approved')

@@ -32,9 +32,10 @@ export function hasChangesRequested(reviews) {
   return [...latestReviewsByUser(reviews).values()].some((r) => r.state === 'CHANGES_REQUESTED');
 }
 
-// Returns one of: 'changes_requested' | 'conflicts' | 'unresolved_comments' | 'ready' | 'partially_approved' | 'waiting_approval'
+// Returns one of: 'draft' | 'changes_requested' | 'conflicts' | 'unresolved_comments' | 'ready' | 'partially_approved' | 'waiting_approval'
 // Order matters: a blocking condition must never be masked by a more "positive" one further down.
-export function getPRReadiness({ reviews, unresolvedThreads = 0, mergeState } = {}) {
+export function getPRReadiness({ reviews, unresolvedThreads = 0, mergeState, draft = false } = {}) {
+  if (draft) return 'draft';
   if (hasChangesRequested(reviews)) return 'changes_requested';
   if (mergeState === 'dirty') return 'conflicts';
   const approvals = countApprovals(reviews);

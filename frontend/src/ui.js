@@ -115,7 +115,9 @@ function createPRCard(pr, prMeta) {
   const watched = isPRWatched(prOwner, prRepo, pr.number);
 
   const badges = [];
-  if (readiness === 'changes_requested') {
+  if (readiness === 'draft') {
+    badges.push(`<span class="badge badge-draft">draft</span>`);
+  } else if (readiness === 'changes_requested') {
     badges.push(`<span class="badge badge-ci badge-ci-failure">changes requested</span>`);
   } else if (readiness === 'unresolved_comments') {
     const n = meta.unresolvedThreads;
@@ -242,7 +244,7 @@ async function fetchPRMetaBatch(cfg, prs) {
             ? await fetchUnresolvedThreadCount(cfg, owner, repo, prNum)
             : 0;
           meta.unresolvedThreads = unresolvedThreads;
-          meta.readiness = getPRReadiness({ reviews, unresolvedThreads, mergeState: prData.mergeable_state });
+          meta.readiness = getPRReadiness({ reviews, unresolvedThreads, mergeState: prData.mergeable_state, draft: prData.draft });
         }
         if (prData.mergeable_state) {
           meta.mergeState = prData.mergeable_state;
